@@ -122,7 +122,10 @@ if(N64_BUILD)
         src/map/label.cpp
         src/map/location.cpp
         src/generators/map_generator.cpp
+        src/generators/map_create.cpp
         src/generators/default_map_generator.cpp
+        src/generators/default_map_generator_job.cpp
+        src/generators/lua_map_generator.cpp
         src/generators/cave_map_generator.cpp
 
         # --- Pathfinding ---
@@ -157,6 +160,7 @@ if(N64_BUILD)
         src/scripting/lua_unit_attacks.cpp
         src/scripting/lua_audio.cpp
         src/scripting/lua_preferences.cpp
+        src/scripting/lua_fileops.cpp
 
         # --- Serialization ---
         src/serialization/binary_or_text.cpp
@@ -253,6 +257,10 @@ if(N64_BUILD)
         src/image_modifications.cpp
         src/utils/general.cpp
         src/utils/config_filters.cpp
+        src/utils/markov_generator.cpp
+        src/utils/name_generator_factory.cpp
+        src/utils/context_free_grammar_generator.cpp
+        src/utils/irdya_datetime.cpp
         src/font/attributes.cpp
 
         # --- Units (additional) ---
@@ -266,6 +274,18 @@ if(N64_BUILD)
         src/ai/default/aspect_attacks.cpp
         src/ai/game_info.cpp
         src/ai/configuration.cpp
+        src/ai/actions.cpp
+        src/ai/registry.cpp
+        src/ai/simulated_actions.cpp
+        src/ai/gamestate_observer.cpp
+        src/ai/composite/component.cpp
+        src/ai/composite/contexts.cpp
+        src/ai/default/engine_cpp.cpp
+        src/ai/default/attack.cpp
+        src/ai/default/ca_move_to_targets.cpp
+        src/ai/lua/aspect_advancements.cpp
+        src/ai/lua/lua_object.cpp
+        src/ai/testing.cpp
 
         # --- Help system ---
         src/help/help.cpp
@@ -282,6 +302,8 @@ if(N64_BUILD)
         # --- Serialization (additional) ---
         src/serialization/markup.cpp
         src/serialization/tokenizer.cpp
+        src/serialization/base64.cpp
+        src/serialization/validator.cpp
 
         # --- Additional modules discovered during integration ---
         src/map_settings.cpp
@@ -303,6 +325,7 @@ if(N64_BUILD)
         src/gui/widgets/settings.cpp
         src/gui/widgets/helper.cpp
         src/gui/core/timer.cpp
+        src/gui/core/canvas.cpp
         src/gui/dialogs/modal_dialog.cpp
 
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
