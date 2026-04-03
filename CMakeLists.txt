@@ -214,7 +214,6 @@ if(N64_BUILD)
         src/persist_manager.cpp
         src/persist_var.cpp
         src/statistics.cpp
-        # statistics_dialog and side_controller are header-only or don't exist
         src/chat_events.cpp
         src/chat_command_handler.cpp
         src/chat_log.cpp
@@ -227,6 +226,50 @@ if(N64_BUILD)
         src/tooltips.cpp
         src/quit_confirmation.cpp
         src/sound_music_track.cpp
+
+        # --- Resources and global state ---
+        src/resources.cpp
+        src/fake_unit_manager.cpp
+        src/fake_unit_ptr.cpp
+        src/commandline_options.cpp
+        src/game_classification.cpp
+        src/mp_game_settings.cpp
+        src/language.cpp
+        src/hash.cpp
+        src/build_info.cpp
+        src/mp_ui_alerts.cpp
+        src/synced_checkup.cpp
+        src/image_modifications.cpp
+        src/utils/general.cpp
+        src/utils/config_filters.cpp
+        src/font/attributes.cpp
+
+        # --- Units (additional) ---
+        src/units/animation_component.cpp
+
+        # --- AI (additional) ---
+        src/ai/contexts.cpp
+        src/ai/composite/rca.cpp
+        src/ai/default/ca.cpp
+        src/ai/default/recruitment.cpp
+        src/ai/default/aspect_attacks.cpp
+        src/ai/game_info.cpp
+        src/ai/configuration.cpp
+
+        # --- Help system ---
+        src/help/help.cpp
+        src/help/help_impl.cpp
+        src/help/help_topic_generators.cpp
+
+        # --- Preferences ---
+        src/preferences/preferences.cpp
+
+        # --- Multiplayer initialization ---
+        src/game_initialization/multiplayer.cpp
+
+        # --- Serialization (additional) ---
+        src/serialization/markup.cpp
+        src/serialization/tokenizer.cpp
 
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
         # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp

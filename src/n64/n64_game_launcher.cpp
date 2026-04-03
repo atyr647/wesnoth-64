@@ -48,6 +48,112 @@ static bool load_campaign_from_rom(const std::string& campaign_id,
 static std::vector<N64CampaignEntry> enumerate_campaigns();
 
 // -----------------------------------------------------------------------
+// game_launcher constructor/destructor
+// -----------------------------------------------------------------------
+game_launcher::game_launcher(const commandline_options& cmdline_opts)
+    : cmdline_opts_(cmdline_opts)
+    , config_manager_()
+    , font_manager_()
+    , image_manager_()
+    , main_event_context_()
+    , hotkey_manager_()
+    , music_thinker_()
+    , music_muter_()
+    , state_()
+    , play_replay_(false)
+    , jump_to_multiplayer_(false)
+{
+}
+
+game_launcher::~game_launcher() {}
+
+// -----------------------------------------------------------------------
+// Initialization methods
+// -----------------------------------------------------------------------
+bool game_launcher::init_video() {
+    // N64 video is initialized in n64_main.cpp
+    return true;
+}
+
+bool game_launcher::init_language() {
+    // N64: English only, no language switching
+    return true;
+}
+
+bool game_launcher::init_lua_script() {
+    return true;
+}
+
+// -----------------------------------------------------------------------
+// Game mode methods
+// -----------------------------------------------------------------------
+bool game_launcher::has_load_data() const { return false; }
+bool game_launcher::load_game_prompt() { return false; }
+bool game_launcher::load_prepared_game() { return false; }
+void game_launcher::set_test(const std::string&) {}
+
+std::string game_launcher::jump_to_campaign_id() const { return ""; }
+bool game_launcher::new_campaign() { return true; }
+bool game_launcher::goto_campaign() { return true; }
+bool game_launcher::goto_multiplayer() { return play_multiplayer(mp_mode::CONNECT); }
+bool game_launcher::goto_editor() { return false; }
+
+bool game_launcher::play_multiplayer(mp_mode) {
+    if (!n64_netlib_connected()) {
+        n64_message_box("Multiplayer",
+            "No USB connection detected.\n"
+            "Connect flashcart USB to PC\n"
+            "running the NetLib Client App.");
+        return false;
+    }
+    n64_message_box("Multiplayer", "Multiplayer lobby connected.");
+    return true;
+}
+
+bool game_launcher::play_multiplayer_commandline() { return false; }
+
+bool game_launcher::play_campaign() {
+    // Delegate to play_game() campaign path
+    return true;
+}
+
+bool game_launcher::change_language() { return false; }
+
+void game_launcher::launch_game(reload_mode) {
+    // Called after scenario selection — the actual play happens in play_game()
+}
+
+void game_launcher::play_replay() {}
+
+bool game_launcher::play_test() { return false; }
+bool game_launcher::play_screenshot_mode() { return false; }
+bool game_launcher::play_render_image_mode() { return false; }
+game_launcher::unit_test_result game_launcher::unit_test() { return unit_test_result::TEST_FAIL; }
+
+void game_launcher::clear_loaded_game() {
+    state_ = saved_game();
+}
+
+void game_launcher::start_wesnothd() {}
+
+editor::EXIT_STATUS game_launcher::start_editor(const std::string&) {
+    n64_message_box("Editor", "The map editor is not available\non Nintendo 64.");
+    return editor::EXIT_STATUS::EXIT_NORMAL;
+}
+
+game_launcher::unit_test_result game_launcher::pass_victory_or_defeat(level_result::type) {
+    return unit_test_result::TEST_PASS;
+}
+
+game_launcher::unit_test_result game_launcher::single_unit_test() {
+    return unit_test_result::TEST_PASS;
+}
+
+savegame::load_game_metadata game_launcher::extract_load_data() {
+    return savegame::load_game_metadata();
+}
+
+// -----------------------------------------------------------------------
 // game_launcher::play_game — the main game loop entry point
 //
 // This is called repeatedly by n64_main.cpp.

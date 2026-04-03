@@ -22,6 +22,47 @@
 
 #ifdef N64_BUILD  // entire file is N64-only
 
+// Block all SDL2 headers from being included — this shim replaces them all
+#define SDL_h_
+#define SDL_H_
+#define SDL_main_h_
+#define SDL_stdinc_h_
+#define SDL_audio_h_
+#define SDL_clipboard_h_
+#define SDL_error_h_
+#define SDL_events_h_
+#define SDL_gamecontroller_h_
+#define SDL_haptic_h_
+#define SDL_hints_h_
+#define SDL_joystick_h_
+#define SDL_keyboard_h_
+#define SDL_keycode_h_
+#define SDL_log_h_
+#define SDL_mouse_h_
+#define SDL_mutex_h_
+#define SDL_pixels_h_
+#define SDL_platform_h_
+#define SDL_power_h_
+#define SDL_rect_h_
+#define SDL_render_h_
+#define SDL_rwops_h_
+#define SDL_scancode_h_
+#define SDL_surface_h_
+#define SDL_system_h_
+#define SDL_syswm_h_
+#define SDL_thread_h_
+#define SDL_timer_h_
+#define SDL_touch_h_
+#define SDL_version_h_
+#define SDL_video_h_
+#define SDL_vulkan_h_
+#define SDL_image_h_
+#define _SDL_IMAGE_H
+#define SDL_ttf_h_
+#define _SDL_TTF_H
+#define SDL_mixer_h_   // also blocked by n64_sdl_mixer_shim.hpp
+#define _SDL_NET_H
+
 #include "n64_platform.hpp"
 #include "n64_video.hpp"
 #include "n64_audio.hpp"
@@ -313,5 +354,157 @@ inline void  SDL_Delay(u32 ms) {
     u32 end = SDL_GetTicks() + ms;
     while (SDL_GetTicks() < end) {}
 }
+
+// -----------------------------------------------------------------------
+// SDL_image stubs — Wesnoth uses IMG_Load, IMG_Init, etc.
+// On N64, all images are pre-converted by the asset pipeline.
+// -----------------------------------------------------------------------
+#define IMG_INIT_PNG 0x02
+
+inline int  IMG_Init(int) { return IMG_INIT_PNG; }
+inline void IMG_Quit() {}
+inline SDL_Surface* IMG_Load(const char*) { return nullptr; }
+inline SDL_Surface* IMG_Load_RW(void*, int) { return nullptr; }
+inline SDL_Texture* IMG_LoadTexture(SDL_Renderer*, const char*) { return nullptr; }
+inline const char*  IMG_GetError() { return "N64: SDL_image not available"; }
+
+// -----------------------------------------------------------------------
+// SDL_Timer stubs — used by AI timing and some UI elements
+// -----------------------------------------------------------------------
+typedef u32 SDL_TimerID;
+typedef u32 (*SDL_TimerCallback)(u32, void*);
+inline SDL_TimerID SDL_AddTimer(u32, SDL_TimerCallback, void*) { return 0; }
+inline int SDL_RemoveTimer(SDL_TimerID) { return 1; }
+
+// -----------------------------------------------------------------------
+// SDL_RWops stubs — Wesnoth uses these for file I/O abstraction
+// -----------------------------------------------------------------------
+struct SDL_RWops {
+    int type;
+    long (*size)(SDL_RWops*);
+    long (*seek)(SDL_RWops*, long, int);
+    size_t (*read)(SDL_RWops*, void*, size_t, size_t);
+    size_t (*write)(SDL_RWops*, const void*, size_t, size_t);
+    int (*close)(SDL_RWops*);
+};
+
+inline SDL_RWops* SDL_RWFromFile(const char*, const char*) { return nullptr; }
+inline SDL_RWops* SDL_RWFromMem(void*, int) { return nullptr; }
+inline SDL_RWops* SDL_RWFromConstMem(const void*, int) { return nullptr; }
+inline int  SDL_RWclose(SDL_RWops*) { return 0; }
+inline long SDL_RWsize(SDL_RWops*) { return 0; }
+
+// -----------------------------------------------------------------------
+// SDL version info (used by build_info.cpp, log output)
+// -----------------------------------------------------------------------
+struct SDL_version {
+    u8 major, minor, patch;
+};
+
+inline void SDL_GetVersion(SDL_version* v) {
+    if (v) { v->major = 2; v->minor = 0; v->patch = 0; }
+}
+inline const char* SDL_GetRevision() { return "N64-shim"; }
+
+// -----------------------------------------------------------------------
+// SDL Hints (used by video.cpp initialization)
+// -----------------------------------------------------------------------
+#define SDL_HINT_RENDER_SCALE_QUALITY "SDL_RENDER_SCALE_QUALITY"
+#define SDL_HINT_VIDEO_ALLOW_SCREENSAVER "SDL_VIDEO_ALLOW_SCREENSAVER"
+#define SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH "SDL_MOUSE_FOCUS_CLICKTHROUGH"
+
+inline int SDL_SetHint(const char*, const char*) { return 1; }
+inline const char* SDL_GetHint(const char*) { return ""; }
+
+// -----------------------------------------------------------------------
+// Additional missing stubs
+// -----------------------------------------------------------------------
+inline int SDL_SetSurfaceBlendMode(SDL_Surface*, SDL_BlendMode) { return 0; }
+inline int SDL_SetSurfaceAlphaMod(SDL_Surface*, u8) { return 0; }
+inline int SDL_UpperBlit(SDL_Surface*, const SDL_Rect*, SDL_Surface*, SDL_Rect*) { return 0; }
+#define SDL_BlitSurface SDL_UpperBlit
+inline int SDL_UpperBlitScaled(SDL_Surface*, const SDL_Rect*, SDL_Surface*, SDL_Rect*) { return 0; }
+#define SDL_BlitScaled SDL_UpperBlitScaled
+inline SDL_Surface* SDL_ConvertSurfaceFormat(SDL_Surface* src, u32, u32) { return src; }
+inline SDL_Surface* SDL_CreateRGBSurfaceFrom(void*, int w, int h, int, int, u32, u32, u32, u32) {
+    return SDL_CreateRGBSurface(0, w, h, 16, 0, 0, 0, 0);
+}
+inline SDL_Surface* SDL_CreateRGBSurfaceWithFormat(u32, int w, int h, int, u32) {
+    return SDL_CreateRGBSurface(0, w, h, 16, 0, 0, 0, 0);
+}
+inline int SDL_FillRect(SDL_Surface*, const SDL_Rect*, u32) { return 0; }
+inline u32 SDL_MapRGBA(void*, u8 r, u8 g, u8 b, u8 a) {
+    return ((u32)r << 24) | ((u32)g << 16) | ((u32)b << 8) | a;
+}
+inline u32 SDL_MapRGB(void*, u8 r, u8 g, u8 b) {
+    return ((u32)r << 24) | ((u32)g << 16) | ((u32)b << 8) | 0xFF;
+}
+
+// SDL_PixelFormat
+struct SDL_PixelFormat {
+    u32 format;
+    u8 BitsPerPixel;
+    u8 BytesPerPixel;
+    u32 Rmask, Gmask, Bmask, Amask;
+};
+
+// SDL Log
+inline void SDL_Log(const char*, ...) {}
+inline void SDL_LogError(int, const char*, ...) {}
+inline void SDL_LogWarn(int, const char*, ...) {}
+inline void SDL_LogInfo(int, const char*, ...) {}
+
+// SDL_GetError / SDL_SetError
+inline const char* SDL_GetError() { return ""; }
+inline int SDL_SetError(const char*, ...) { return -1; }
+inline void SDL_ClearError() {}
+
+// Keymod
+#define KMOD_NONE  0x0000
+#define KMOD_LSHIFT 0x0001
+#define KMOD_RSHIFT 0x0002
+#define KMOD_SHIFT (KMOD_LSHIFT | KMOD_RSHIFT)
+#define KMOD_LCTRL 0x0040
+#define KMOD_RCTRL 0x0080
+#define KMOD_CTRL  (KMOD_LCTRL | KMOD_RCTRL)
+#define KMOD_LALT  0x0100
+#define KMOD_RALT  0x0200
+#define KMOD_ALT   (KMOD_LALT | KMOD_RALT)
+
+inline int SDL_GetModState() { return KMOD_NONE; }
+inline void SDL_SetModState(int) {}
+
+// Mouse
+#define SDL_BUTTON_LEFT   1
+#define SDL_BUTTON_MIDDLE 2
+#define SDL_BUTTON_RIGHT  3
+
+inline u32 SDL_GetMouseState(int* x, int* y) {
+    if (x) *x = N64_SCREEN_W / 2;
+    if (y) *y = N64_SCREEN_H / 2;
+    return 0;
+}
+
+// Keyboard
+inline const u8* SDL_GetKeyboardState(int* numkeys) {
+    static u8 keys[512] = {};
+    if (numkeys) *numkeys = 512;
+    return keys;
+}
+
+// OpenSSL stubs — preferences.cpp includes these conditionally
+#ifndef OPENSSL_EVP_H
+#define OPENSSL_EVP_H
+#define OPENSSL_ERR_H
+// Stub the functions used by preferences for password hashing
+typedef void EVP_MD_CTX;
+typedef void EVP_MD;
+inline EVP_MD_CTX* EVP_MD_CTX_new() { return nullptr; }
+inline void EVP_MD_CTX_free(EVP_MD_CTX*) {}
+inline const EVP_MD* EVP_sha256() { return nullptr; }
+inline int EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, void*) { return 0; }
+inline int EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t) { return 0; }
+inline int EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*) { return 0; }
+#endif
 
 #endif // N64_BUILD

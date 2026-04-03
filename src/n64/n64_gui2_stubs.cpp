@@ -135,6 +135,36 @@ namespace retval {
     const int NONE = 0;
 }
 
+// =====================================================================
+// gui2::event functions used by display.cpp, etc.
+// =====================================================================
+namespace event {
+    bool is_in_dialog() { return false; }
+
+    // Event manager — no-op on N64
+    manager::manager() {}
+    manager::~manager() {}
+} // namespace event
+
 } // namespace gui2
+
+// =====================================================================
+// video namespace — N64 replacement for src/video.cpp
+// (video.cpp is not compiled for N64; n64_video_adapter.cpp handles it,
+//  but some inline functions reference free functions we must provide)
+// =====================================================================
+namespace video {
+    int get_pixel_scale() { return 1; }
+}
+
+// =====================================================================
+// floating_label namespace — stub (implemented in n64_stubs.cpp)
+// =====================================================================
+
+// =====================================================================
+// draw_manager — N64 replacement for src/draw_manager.cpp
+// (draw_manager.cpp is not in the N64 source list; n64_draw_manager.cpp
+//  provides the implementation, auto-globbed from src/n64/)
+// =====================================================================
 
 #endif // N64_BUILD

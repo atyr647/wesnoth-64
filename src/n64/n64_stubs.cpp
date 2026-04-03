@@ -285,6 +285,27 @@ void set_sound_volume(int vol) { n64_sfx_set_volume((u8)vol); }
 void set_bell_volume(int) {}
 void set_UI_volume(int) {}
 
+void play_music() {}
+void play_track(unsigned int) {}
+void commit_music_changes() {}
+bool is_sound_playing(int) { return false; }
+void stop_sound(int) {}
+void play_sound_positioned(const std::string&, int, int, unsigned int) {}
+
+void reset_sound() {}
+void close_sound() {}
+bool init_sound() { return true; }
+
+// music_thinker
+music_thinker::music_thinker() {}
+music_thinker::~music_thinker() {}
+void music_thinker::process(events::pump_info&) { n64_audio_update(); }
+
+// music_muter
+music_muter::music_muter() : sdl_handler(false) {}
+void music_muter::handle_event(const SDL_Event&) {}
+void music_muter::handle_window_event(const SDL_Event&) {}
+
 } // namespace sound
 
 // Image cache: handled by n64_sdl_wrappers.cpp (image namespace)
