@@ -26,6 +26,7 @@
 #include "../gui/dialogs/transient_message.hpp"
 #include "../gui/dialogs/loading_screen.hpp"
 #include "../gui/dialogs/modal_dialog.hpp"
+#include "../gui/widgets/retval.hpp"
 
 #include "../config.hpp"
 
@@ -58,7 +59,7 @@ int show_message(const std::string& title,
         mb = N64_MB_OKCANCEL;
 
     int result = n64_message_box(title.c_str(), message.c_str(), mb);
-    return result == 0 ? -2 : -1; // OK=-2, Cancel=-1 (gui2 retval convention)
+    return result == 0 ? gui2::retval::OK : gui2::retval::CANCEL;
 }
 
 void show_error_message(const std::string& message, bool) {
@@ -79,17 +80,14 @@ void show_transient_error_message(const std::string& message, bool) {
 }
 
 // =====================================================================
-// modal_dialog base class
+// Dialog class stubs
+//
+// modal_dialog inherits from window → panel → ... (deep hierarchy).
+// We don't provide constructor/destructor implementations for the base
+// classes since we never instantiate dialog objects on N64 — we only
+// call the static execute()/display() methods.
 // =====================================================================
 namespace dialogs {
-
-modal_dialog::modal_dialog(const std::string&) {}
-modal_dialog::~modal_dialog() {}
-
-bool modal_dialog::show(const unsigned) {
-    // Default: returns true (OK). Specific dialogs override behavior.
-    return true;
-}
 
 // =====================================================================
 // loading_screen
@@ -126,14 +124,11 @@ void loading_screen::raise() {}
 
 } // namespace dialogs
 
-// =====================================================================
-// retval constants (used by game code to check dialog results)
-// =====================================================================
-namespace retval {
-    const int OK = -2;
-    const int CANCEL = -1;
-    const int NONE = 0;
-}
+// gui2 init/theme (from gui/gui.hpp)
+void init() {}
+void switch_theme(const std::string&) {}
+
+// retval constants: defined as enum in gui/widgets/retval.hpp (included above)
 
 // =====================================================================
 // gui2::event functions used by display.cpp, etc.
