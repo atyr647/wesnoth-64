@@ -9,6 +9,134 @@ include(CTest)
 # use our own version of Find* scripts
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+# -----------------------------------------------------------------------
+# N64 Build — early-exit and hand off to n64-specific configuration
+# -----------------------------------------------------------------------
+if(N64_BUILD)
+    message(STATUS "=== Wesnoth N64 Port Build ===")
+    message(STATUS "Toolchain : ${CMAKE_C_COMPILER}")
+    message(STATUS "Target    : Nintendo 64 (VR4300 MIPS, libdragon)")
+
+    # Force-disable everything incompatible with N64
+    set(ENABLE_SERVER          OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CAMPAIGN_SERVER OFF CACHE BOOL "" FORCE)
+    set(ENABLE_NLS             OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTS           OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GAME            ON  CACHE BOOL "" FORCE)
+
+    # N64 game target
+    file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp")
+
+    # Core game logic sources that port directly (no SDL/Boost dependency at the .cpp level)
+    set(N64_GAME_SOURCES
+        ${N64_PLATFORM_SOURCES}
+        src/actions/attack.cpp
+        src/actions/create.cpp
+        src/actions/heal.cpp
+        src/actions/move.cpp
+        src/actions/undo.cpp
+        src/actions/vision.cpp
+        src/ai/manager.cpp
+        src/ai/composite/ai.cpp
+        src/ai/composite/aspect.cpp
+        src/ai/composite/engine.cpp
+        src/ai/composite/goal.cpp
+        src/ai/composite/stage.cpp
+        src/ai/default/contexts.cpp
+        src/ai/default/stage_combat.cpp
+        src/ai/default/stage_move.cpp
+        src/ai/default/stage_recruit.cpp
+        src/ai/formula/ai.cpp
+        src/attack_prediction.cpp
+        src/carryover.cpp
+        src/color.cpp
+        src/color_range.cpp
+        src/config.cpp
+        src/formula/formula.cpp
+        src/formula/function.cpp
+        src/formula/string_utils.cpp
+        src/game_board.cpp
+        src/game_config.cpp
+        src/game_events/action_wml.cpp
+        src/game_events/conditional_wml.cpp
+        src/game_events/entity_location.cpp
+        src/game_events/handlers.cpp
+        src/game_events/manager.cpp
+        src/game_events/pump.cpp
+        src/game_state.cpp
+        src/log.cpp
+        src/map/map.cpp
+        src/map/label.cpp
+        src/pathfind/pathfind.cpp
+        src/pathfind/teleport.cpp
+        src/random.cpp
+        src/scripting/game_lua_kernel.cpp
+        src/scripting/lua_common.cpp
+        src/scripting/lua_unit.cpp
+        src/scripting/lua_wml.cpp
+        src/serialization/binary_or_text.cpp
+        src/serialization/parser.cpp
+        src/serialization/preprocessor.cpp
+        src/serialization/string_utils.cpp
+        src/terrain/builder.cpp
+        src/terrain/terrain.cpp
+        src/terrain/type_data.cpp
+        src/tod_manager.cpp
+        src/units/abilities.cpp
+        src/units/animation.cpp
+        src/units/attack_type.cpp
+        src/units/filter.cpp
+        src/units/id.cpp
+        src/units/map.cpp
+        src/units/types.cpp
+        src/units/unit.cpp
+    )
+
+    # Lua submodule (same C files as PC build, stripped of OS/file I/O)
+    file(GLOB LUA_SOURCES "src/modules/lua/*.c")
+    list(FILTER LUA_SOURCES EXCLUDE REGEX ".*(liolib|loslib|loadlib|lua\\.c|luac\\.c).*")
+
+    add_executable(wesnoth_n64 ${N64_GAME_SOURCES} ${LUA_SOURCES})
+
+    target_include_directories(wesnoth_n64PRIVATE
+        src/
+        src/n64/
+        src/modules/lua/
+        ${N64_INST}/include
+    )
+
+    target_compile_definitions(wesnoth_n64 PRIVATE
+        N64_BUILD=1
+        LUA_USE_LONGJMP=1       # use longjmp for Lua errors (no C++ exceptions on N64)
+        LUA_MAXSTACK=512        # reduce Lua stack from default 15000
+        LUAI_MAXCSTACK=200      # reduce C stack nesting limit
+    )
+
+    # Inject shims: SDL → n64_sdl_shim.hpp, Boost → n64_boost_shim.hpp
+    target_compile_options(wesnoth_n64 PRIVATE
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_shim.hpp
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp
+    )
+
+    # Link libdragon
+    target_link_libraries(wesnoth_n64 PRIVATE
+        ${N64_INST}/mips64-elf/lib/libdragon.a
+        ${N64_INST}/mips64-elf/lib/libdragonsys.a
+        m c
+    )
+
+    n64_create_rom(wesnoth_n64)
+
+    # Asset pipeline tool (host-side, always built with the host compiler)
+    add_subdirectory(tools/n64-asset-pipeline)
+
+    # Stop processing the rest of this file (it's PC-specific)
+    return()
+endif()
+# -----------------------------------------------------------------------
+# END N64 BUILD BLOCK
+# -----------------------------------------------------------------------
+
 # function to remove a flag from a variable
 function(RemoveFlag VAR SCOPE FLAG DOCSTRING)
 	if(NOT "${${VAR}}" STREQUAL "")
