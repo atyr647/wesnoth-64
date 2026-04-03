@@ -273,8 +273,11 @@ if(N64_BUILD)
 
         # --- Additional modules discovered during integration ---
         src/map_settings.cpp
-        src/floating_label.cpp
+        # src/floating_label.cpp — excluded; replaced by n64_stubs.cpp floating_label
         src/utils/parse_network_address.cpp
+
+        # --- GUI2 framework (minimal: only what's needed for TLD registration) ---
+        src/gui/core/top_level_drawable.cpp
 
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
         # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp
