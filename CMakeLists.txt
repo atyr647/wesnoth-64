@@ -34,11 +34,18 @@ if(N64_BUILD)
 
         # --- Actions (game commands: move, attack, recruit, etc.) ---
         src/actions/attack.cpp
+        src/actions/advancement.cpp
         src/actions/create.cpp
         src/actions/heal.cpp
         src/actions/move.cpp
+        src/actions/unit_creator.cpp
         src/actions/undo.cpp
         src/actions/undo_action.cpp
+        src/actions/undo_recruit_action.cpp
+        src/actions/undo_recall_action.cpp
+        src/actions/undo_move_action.cpp
+        src/actions/undo_dismiss_action.cpp
+        src/actions/undo_update_shroud_action.cpp
         src/actions/vision.cpp
         src/actions/shroud_clearing_action.cpp
 
@@ -223,12 +230,16 @@ if(N64_BUILD)
         src/hotkey/hotkey_item.cpp
         src/hotkey/hotkey_manager.cpp
         src/hotkey/hotkey_handler.cpp
+        src/hotkey/command_executor.cpp
         src/tooltips.cpp
         src/quit_confirmation.cpp
         # src/sound_music_track.cpp — excluded; uses vorbisfile.h, stubs in n64_stubs.cpp
 
         # --- Resources and global state ---
         src/resources.cpp
+        src/wml_exception.cpp
+        src/display_chat_manager.cpp
+        src/game_version.cpp
         src/fake_unit_manager.cpp
         src/fake_unit_ptr.cpp
         src/commandline_options.cpp
@@ -311,6 +322,7 @@ if(N64_BUILD)
         src/sdl/texture.cpp
         src/sdl/surface.cpp
         src/sdl/utils.cpp
+        src/sdl/input.cpp
     )
 
     # Lua submodule (same C files as PC build, stripped of OS/file I/O)
