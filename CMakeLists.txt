@@ -27,15 +27,22 @@ if(N64_BUILD)
     # N64 game target
     file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp")
 
-    # Core game logic sources that port directly (no SDL/Boost dependency at the .cpp level)
+    # Core game logic sources — comprehensive list for a playable N64 build
+    # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
     set(N64_GAME_SOURCES
         ${N64_PLATFORM_SOURCES}
+
+        # --- Actions (game commands: move, attack, recruit, etc.) ---
         src/actions/attack.cpp
         src/actions/create.cpp
         src/actions/heal.cpp
         src/actions/move.cpp
         src/actions/undo.cpp
+        src/actions/undo_action.cpp
         src/actions/vision.cpp
+        src/actions/shroud_clearing_action.cpp
+
+        # --- AI ---
         src/ai/manager.cpp
         src/ai/composite/ai.cpp
         src/ai/composite/aspect.cpp
@@ -47,41 +54,126 @@ if(N64_BUILD)
         src/ai/default/stage_move.cpp
         src/ai/default/stage_recruit.cpp
         src/ai/formula/ai.cpp
-        src/attack_prediction.cpp
-        src/carryover.cpp
+        src/ai/lua/core.cpp
+        src/ai/lua/engine_lua.cpp
+
+        # --- Core game data structures ---
+        src/config.cpp
+        src/config_cache.cpp
         src/color.cpp
         src/color_range.cpp
-        src/config.cpp
+        src/tstring.cpp
+        src/variable.cpp
+        src/variable_info.cpp
+
+        # --- Formula engine ---
         src/formula/formula.cpp
         src/formula/function.cpp
         src/formula/string_utils.cpp
+        src/formula/callable_objects.cpp
+
+        # --- Game board and state ---
         src/game_board.cpp
         src/game_config.cpp
+        src/game_config_manager.cpp
+        src/game_config_view.cpp
+        src/game_state.cpp
+        src/game_data.cpp
+
+        # --- Game events (WML event system) ---
         src/game_events/action_wml.cpp
         src/game_events/conditional_wml.cpp
         src/game_events/entity_location.cpp
         src/game_events/handlers.cpp
         src/game_events/manager.cpp
         src/game_events/pump.cpp
-        src/game_state.cpp
-        src/log.cpp
+        src/game_events/wmi_manager.cpp
+
+        # --- Game initialization ---
+        src/game_initialization/playcampaign.cpp
+        src/game_initialization/connect_engine.cpp
+        src/game_initialization/create_engine.cpp
+        src/game_initialization/singleplayer.cpp
+        src/game_initialization/configure_engine.cpp
+
+        # --- Game controllers ---
+        src/play_controller.cpp
+        src/playsingle_controller.cpp
+        src/playmp_controller.cpp
+        src/controller_base.cpp
+        src/mouse_handler_base.cpp
+        src/game_end_exceptions.cpp
+
+        # --- Display (N64 overrides in n64_display.cpp, n64_video_adapter.cpp, n64_draw_manager.cpp) ---
+        src/display.cpp
+        src/game_display.cpp
+        src/display_context.cpp
+        src/reports.cpp
+        src/theme.cpp
+        src/animated.cpp
+        src/arrow.cpp
+
+        # --- Map ---
         src/map/map.cpp
         src/map/label.cpp
+        src/map/location.cpp
+        src/generators/map_generator.cpp
+        src/generators/default_map_generator.cpp
+        src/generators/cave_map_generator.cpp
+
+        # --- Pathfinding ---
         src/pathfind/pathfind.cpp
         src/pathfind/teleport.cpp
+        src/pathfind/aststar.cpp
+
+        # --- RNG ---
         src/random.cpp
+        src/random_synced.cpp
+        src/random_deterministic.cpp
+        src/synced_commands.cpp
+        src/synced_context.cpp
+        src/replay.cpp
+        src/replay_helper.cpp
+
+        # --- Scripting (Lua) ---
         src/scripting/game_lua_kernel.cpp
+        src/scripting/application_lua_kernel.cpp
         src/scripting/lua_common.cpp
         src/scripting/lua_unit.cpp
         src/scripting/lua_wml.cpp
+        src/scripting/lua_race.cpp
+        src/scripting/lua_team.cpp
+        src/scripting/lua_gui2.cpp
+        src/scripting/lua_map_location_ops.cpp
+        src/scripting/lua_terrainfilter.cpp
+        src/scripting/lua_kernel_base.cpp
+        src/scripting/lua_terrainmap.cpp
+        src/scripting/lua_cpp_function.cpp
+        src/scripting/lua_formula_bridge.cpp
+        src/scripting/lua_unit_attacks.cpp
+        src/scripting/lua_audio.cpp
+        src/scripting/lua_preferences.cpp
+
+        # --- Serialization ---
         src/serialization/binary_or_text.cpp
         src/serialization/parser.cpp
         src/serialization/preprocessor.cpp
         src/serialization/string_utils.cpp
+        src/serialization/unicode.cpp
+        src/serialization/schema_validator.cpp
+
+        # --- Terrain ---
         src/terrain/builder.cpp
         src/terrain/terrain.cpp
         src/terrain/type_data.cpp
+        src/terrain/filter.cpp
+        src/terrain/translation.cpp
+
+        # --- Time of day ---
         src/tod_manager.cpp
+        src/time_of_day.cpp
+
+        # --- Units ---
         src/units/abilities.cpp
         src/units/animation.cpp
         src/units/attack_type.cpp
@@ -90,6 +182,75 @@ if(N64_BUILD)
         src/units/map.cpp
         src/units/types.cpp
         src/units/unit.cpp
+        src/units/race.cpp
+        src/units/udisplay.cpp
+        src/units/drawer.cpp
+        src/units/helper.cpp
+        src/units/frame.cpp
+        src/units/ptr.cpp
+
+        # --- Team ---
+        src/team.cpp
+        src/recall_list_manager.cpp
+        src/side_filter.cpp
+
+        # --- Savegame ---
+        src/savegame.cpp
+        src/saved_game.cpp
+        src/save_index.cpp
+        src/carryover.cpp
+
+        # --- Story screens ---
+        src/storyscreen/controller.cpp
+        src/storyscreen/part.cpp
+        src/storyscreen/parser.cpp
+        src/storyscreen/render.cpp
+
+        # --- Other essential modules ---
+        src/log.cpp
+        src/attack_prediction.cpp
+        src/about.cpp
+        src/achievements.cpp
+        src/picture.cpp
+        src/minimap.cpp
+        src/persist_context.cpp
+        src/persist_manager.cpp
+        src/persist_var.cpp
+        src/statistics.cpp
+        src/statistics_dialog.cpp
+        src/side_controller.cpp
+        src/chat_events.cpp
+        src/chat_command_handler.cpp
+        src/chat_log.cpp
+        src/menu_events.cpp
+        src/mouse_events.cpp
+        src/hotkey/hotkey_command.cpp
+        src/hotkey/hotkey_item.cpp
+        src/hotkey/hotkey_manager.cpp
+        src/hotkey/hotkey_handler.cpp
+        src/tooltips.cpp
+        src/quit_confirmation.cpp
+        src/sound_music_track.cpp
+
+        # --- Filesystem abstraction (N64: routes through n64_romfs) ---
+        src/filesystem.cpp
+        src/filesystem_common.cpp
+
+        # --- Font (N64: routes through n64_video text drawing) ---
+        src/font/text.cpp
+        src/font/font_config.cpp
+        src/font/font_id.cpp
+        src/font/sdl_ttf_compat.cpp
+        src/font/standard_colors.cpp
+        src/font/marked_up_text.cpp
+
+        # --- Widgets/events shim (minimal for N64) ---
+        src/events.cpp
+        src/draw.cpp
+        src/sdl/rect.cpp
+        src/sdl/texture.cpp
+        src/sdl/surface.cpp
+        src/sdl/utils.cpp
     )
 
     # Lua submodule (same C files as PC build, stripped of OS/file I/O)
@@ -98,7 +259,7 @@ if(N64_BUILD)
 
     add_executable(wesnoth_n64 ${N64_GAME_SOURCES} ${LUA_SOURCES})
 
-    target_include_directories(wesnoth_n64PRIVATE
+    target_include_directories(wesnoth_n64 PRIVATE
         src/
         src/n64/
         src/modules/lua/
@@ -118,10 +279,16 @@ if(N64_BUILD)
         -include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp
     )
 
-    # Link libdragon
+    # Linker script
+    target_link_options(wesnoth_n64 PRIVATE
+        -T ${CMAKE_SOURCE_DIR}/src/n64/wesnoth_n64.ld
+    )
+
+    # Link libdragon + zlib (for save compression)
     target_link_libraries(wesnoth_n64 PRIVATE
         ${N64_INST}/mips64-elf/lib/libdragon.a
         ${N64_INST}/mips64-elf/lib/libdragonsys.a
+        z    # zlib (for savegame compression)
         m c
     )
 
