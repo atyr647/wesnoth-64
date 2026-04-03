@@ -224,6 +224,29 @@ namespace boost {
 namespace locale {
     inline std::string translate(const std::string& s) { return s; }
     inline std::string translate(const char* s) { return s ? s : ""; }
+
+    // boost::locale::info — used by gettext.hpp
+    class info : public std::locale::facet {
+    public:
+        static std::locale::id id;
+        info() = default;
+        std::string name() const { return "en_US.UTF-8"; }
+        std::string language() const { return "en"; }
+        std::string country() const { return "US"; }
+        std::string variant() const { return ""; }
+        std::string encoding() const { return "UTF-8"; }
+        bool utf8() const { return true; }
+    };
+
+    // boost::locale::generator
+    class generator {
+    public:
+        generator() = default;
+        void add_messages_path(const std::string&) {}
+        void add_messages_domain(const std::string&) {}
+        std::locale generate(const std::string&) const { return std::locale(); }
+        std::locale operator()(const std::string&) const { return std::locale(); }
+    };
 } // locale
 } // boost
 

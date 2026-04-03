@@ -271,6 +271,11 @@ if(N64_BUILD)
         src/serialization/markup.cpp
         src/serialization/tokenizer.cpp
 
+        # --- Additional modules discovered during integration ---
+        src/map_settings.cpp
+        src/floating_label.cpp
+        src/utils/parse_network_address.cpp
+
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
         # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp
         src/filesystem_common.cpp
