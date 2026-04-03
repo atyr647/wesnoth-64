@@ -31,6 +31,18 @@
 #include "n64_video.hpp"
 #include "n64_gui.hpp"
 
+#include "../config.hpp"
+#include "../color.hpp"
+#include "../sdl/surface.hpp"
+#include "../sound_music_track.hpp"
+#include "../utils/optional_fwd.hpp"
+
+#include <string>
+#include <vector>
+#include <map>
+#include <memory>
+#include <functional>
+
 // =====================================================================
 // floating_label.cpp replacement
 // =====================================================================
@@ -49,36 +61,27 @@ void floating_label::set_bg_color(const color_t&) {}
 void floating_label::set_border_size(int) {}
 void floating_label::set_position(double, double) {}
 void floating_label::set_move(double, double) {}
-void floating_label::set_lifetime(int lt, int ft) {
-    lifetime_ = lt;
-    fadeout_  = ft;
+void floating_label::set_lifetime(const std::chrono::milliseconds& lifetime,
+                                   const std::chrono::milliseconds& fadeout) {
+    lifetime_ = lifetime;
+    fadeout_  = fadeout;
 }
-void floating_label::set_width(int) {}
-void floating_label::set_height(int) {}
-void floating_label::set_clip_rect(const rect&) {}
-void floating_label::set_alignment(ALIGN) {}
-void floating_label::set_scroll_mode(LABEL_SCROLL_MODE) {}
-void floating_label::use_markup(bool) {}
-bool floating_label::expired(unsigned) const { return lifetime_ <= 0; }
-void floating_label::show(bool) {}
-rect floating_label::get_draw_size() const { return {0,0,0,0}; }
 
 void floating_label::undraw() {}
-void floating_label::update(unsigned) {
-    if (lifetime_ > 0) --lifetime_;
-}
+void floating_label::move(double, double) {}
+void floating_label::update(const clock::time_point&) {}
 void floating_label::draw() {
     // Render as simple N64 text
     n64_draw_text_shadowed((s16)xpos_, (s16)ypos_, text_.c_str(),
                             N64Color::white());
 }
-void floating_label::create_texture() {}
+bool floating_label::create_texture() { return true; }
 void floating_label::clear_texture() {}
 
 int  add_floating_label(const floating_label&) { return s_next_label_id++; }
 void move_floating_label(int, double, double) {}
 void scroll_floating_labels(double, double) {}
-void remove_floating_label(int, int) {}
+void remove_floating_label(int, const std::chrono::milliseconds&) {}
 void show_floating_label(int, bool) {}
 void draw_floating_labels() {}
 void update_floating_labels() {}
@@ -277,7 +280,8 @@ void play_UI_sound(const std::string& file) {
     }
 }
 
-void play_timer(const std::string&, int, unsigned) {}
+void play_timer(const std::string&,
+    const std::chrono::milliseconds&, const std::chrono::milliseconds&) {}
 void stop_timer() {}
 
 void set_music_volume(int vol) { n64_music_set_volume((u8)vol); }
@@ -311,24 +315,121 @@ void music_muter::handle_window_event(const SDL_Event&) {}
 // Image cache: handled by n64_sdl_wrappers.cpp (image namespace)
 
 // =====================================================================
-// Preferences — hardcoded for N64
+// Remaining sound:: functions needed by lua_audio.cpp etc.
+// (sound_music_track.cpp is compiled for N64 — provides music_track ctors)
+// (standard_colors.cpp is compiled for N64 — provides font color constants)
 // =====================================================================
-namespace preferences {
 
-int music_volume()       { return 180; }
-int sound_volume()       { return 200; }
-bool music_on()          { return true; }
-bool sound_on()          { return true; }
-bool turn_bell()         { return true; }
-int scroll_speed()       { return 30; }
-bool turbo()             { return false; }
-double turbo_speed()     { return 2.0; }
-int font_scaling()       { return 100; }
-bool animate_map()       { return true; }
-bool animate_water()     { return false; } // save CPU
-bool show_fps()          { return false; }
-bool grid()              { return false; }
+namespace sound {
 
-} // namespace preferences
+void write_music_play_list(config&) {}
+int get_music_volume() { return 180; }
+int get_sound_volume() { return 200; }
+
+utils::optional<unsigned int> get_current_track_index() { return utils::nullopt; }
+std::shared_ptr<sound::music_track> get_current_track() { return nullptr; }
+std::shared_ptr<sound::music_track> get_previous_music_track() { return nullptr; }
+void set_previous_track(std::shared_ptr<music_track>) {}
+unsigned int get_num_tracks() { return 0; }
+void remove_track(unsigned int) {}
+
+std::shared_ptr<sound::music_track> get_track(unsigned int) { return nullptr; }
+void set_track(unsigned int, const std::shared_ptr<music_track>&) {}
+
+void flush_cache() {}
+void reposition_sound(int, unsigned int) {}
+
+std::string current_driver() { return "n64_audio"; }
+std::vector<std::string> enumerate_drivers() { return {"n64_audio"}; }
+
+driver_status driver_status::query() {
+    return {true, 22050, 0x8010, 1, 1024};
+}
+
+// music_track constructors (sound_music_track.cpp excluded — uses vorbis)
+music_track::music_track(const std::string& file_path, const config&)
+    : id_(file_path), file_path_(file_path), title_(file_path) {}
+music_track::music_track(const std::string& file_path, const std::string& file)
+    : id_(file), file_path_(file_path), title_(file) {}
+
+std::shared_ptr<music_track> music_track::create(const config&) { return nullptr; }
+std::shared_ptr<music_track> music_track::create(const std::string&) { return nullptr; }
+void music_track::write(config&, bool) const {}
+
+} // namespace sound
+
+// =====================================================================
+// font::get_text_renderer() — returns singleton pango_text
+// =====================================================================
+#include "../font/text.hpp"
+
+namespace font {
+
+pango_text& get_text_renderer() {
+    static pango_text renderer;
+    return renderer;
+}
+
+} // namespace font
+
+// =====================================================================
+// events::command_disabler — used by mouse_handler_base
+// =====================================================================
+#include "../mouse_handler_base.hpp"
+
+namespace events {
+
+int commands_disabled = 0;
+
+command_disabler::command_disabler() { ++commands_disabled; }
+command_disabler::~command_disabler() { --commands_disabled; }
+
+} // namespace events
+
+// =====================================================================
+// video:: additional functions
+// =====================================================================
+#include "../video.hpp"
+
+namespace video {
+
+surface read_pixels(rect*) { return surface(); }
+surface read_pixels_low_res(rect*) { return surface(); }
+
+} // namespace video
+
+// =====================================================================
+// whiteboard (wb::) structs — disabled on N64
+// =====================================================================
+#include "../whiteboard/manager.hpp"
+
+namespace wb {
+
+future_map::future_map() : initial_planned_unit_map_(false) {}
+future_map::~future_map() {}
+
+future_map_if_active::future_map_if_active()
+    : initial_planned_unit_map_(false), whiteboard_active_(false) {}
+future_map_if_active::~future_map_if_active() {}
+
+} // namespace wb
+
+// resources:: global pointers — defined in resources.cpp (already compiled for N64)
+
+// =====================================================================
+// Minimap prep function
+// =====================================================================
+#include "../minimap.hpp"
+
+namespace image {
+
+std::function<rect(rect)> prep_minimap_for_rendering(
+    const gamemap&, const team*, const unit_map*,
+    const std::map<map_location, unsigned int>*, bool) {
+    // Return identity transform — minimap handled by n64_display.cpp
+    return [](rect r) { return r; };
+}
+
+} // namespace image
 
 #endif // N64_BUILD

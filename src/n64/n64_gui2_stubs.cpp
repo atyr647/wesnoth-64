@@ -130,16 +130,7 @@ void switch_theme(const std::string&) {}
 
 // retval constants: defined as enum in gui/widgets/retval.hpp (included above)
 
-// =====================================================================
-// gui2::event functions used by display.cpp, etc.
-// =====================================================================
-namespace event {
-    bool is_in_dialog() { return false; }
-
-    // Event manager — no-op on N64
-    manager::manager() {}
-    manager::~manager() {}
-} // namespace event
+// gui2::event functions — now provided by gui/core/event/handler.cpp (compiled for N64)
 
 } // namespace gui2
 

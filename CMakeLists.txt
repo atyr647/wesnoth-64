@@ -180,7 +180,7 @@ if(N64_BUILD)
         src/units/types.cpp
         src/units/unit.cpp
         src/units/race.cpp
-        src/units/udisplay.cpp
+        # src/units/udisplay.cpp — excluded; replaced by src/n64/n64_unit_display.cpp
         src/units/drawer.cpp
         src/units/helper.cpp
         src/units/frame.cpp
@@ -225,7 +225,7 @@ if(N64_BUILD)
         src/hotkey/hotkey_handler.cpp
         src/tooltips.cpp
         src/quit_confirmation.cpp
-        src/sound_music_track.cpp
+        # src/sound_music_track.cpp — excluded; uses vorbisfile.h, stubs in n64_stubs.cpp
 
         # --- Resources and global state ---
         src/resources.cpp
@@ -262,7 +262,8 @@ if(N64_BUILD)
         src/help/help_topic_generators.cpp
 
         # --- Preferences ---
-        src/preferences/preferences.cpp
+        # src/preferences/preferences.cpp — excluded; replaced by src/n64/n64_preferences.cpp
+        # (preferences.cpp includes gui/dialogs/file_dialog.hpp which is not built for N64)
 
         # --- Multiplayer initialization ---
         src/game_initialization/multiplayer.cpp
@@ -276,8 +277,22 @@ if(N64_BUILD)
         # src/floating_label.cpp — excluded; replaced by n64_stubs.cpp floating_label
         src/utils/parse_network_address.cpp
 
-        # --- GUI2 framework (minimal: only what's needed for TLD registration) ---
+        # --- GUI2 framework (widget hierarchy needed for modal_dialog + TLD registration) ---
         src/gui/core/top_level_drawable.cpp
+        src/gui/core/log.cpp
+        src/gui/core/event/dispatcher.cpp
+        src/gui/core/event/handler.cpp
+        src/gui/core/static_registry.cpp
+        src/gui/widgets/widget.cpp
+        src/gui/widgets/styled_widget.cpp
+        src/gui/widgets/container_base.cpp
+        src/gui/widgets/grid.cpp
+        src/gui/widgets/panel.cpp
+        src/gui/widgets/window.cpp
+        src/gui/widgets/settings.cpp
+        src/gui/widgets/helper.cpp
+        src/gui/core/timer.cpp
+        src/gui/dialogs/modal_dialog.cpp
 
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
         # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp

@@ -38,6 +38,7 @@
 #define __PANGO_RENDERER_H__
 #define __PANGO_GLYPH_H__
 #define __PANGO_GLYPH_ITEM_H__
+#define __PANGO_COLOR_H__
 
 // Block include paths
 #define PANGO_PANGO_H_INSIDE
@@ -56,6 +57,7 @@
 // -----------------------------------------------------------------------
 typedef int gboolean;
 typedef unsigned int guint;
+typedef unsigned short guint16;
 typedef void* gpointer;
 
 inline void g_object_unref(void*) {}
@@ -120,6 +122,7 @@ struct PangoLayoutLine {};
 struct PangoLayoutIter {};
 struct PangoFontMap {};
 struct PangoFontDescription {};
+struct PangoColor { guint16 red; guint16 green; guint16 blue; };
 struct PangoAttrList {};
 struct PangoAttribute {};
 struct PangoAttrShape {
@@ -190,6 +193,10 @@ inline void pango_layout_index_to_line_x(PangoLayout*, int, gboolean, int* line,
 }
 
 inline const char* pango_layout_get_text(PangoLayout*) { return ""; }
+inline gboolean pango_color_parse(PangoColor* color, const char*) {
+    if (color) { color->red = 0xDDDD; color->green = 0xDDDD; color->blue = 0xDDDD; }
+    return 0; // parse failure — caller falls back to NORMAL_COLOR
+}
 
 inline PangoLayoutIter* pango_layout_get_iter(PangoLayout*) { return nullptr; }
 inline void pango_layout_iter_free(PangoLayoutIter*) {}

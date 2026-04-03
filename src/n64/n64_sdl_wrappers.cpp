@@ -19,6 +19,12 @@
 #include "n64_video.hpp"
 #include "n64_platform.hpp"
 
+#include "../map/location.hpp"
+
+#include <array>
+#include <ostream>
+#include <functional>
+
 // -----------------------------------------------------------------------
 // src/draw.cpp replacement — Wesnoth's draw namespace
 //
@@ -93,6 +99,48 @@ bool null_clip() { return false; }
 void force_render_target(const texture&) {}
 void clear_render_target() {}
 
+// RAII render target setter
+render_target_setter::render_target_setter(const texture&)
+    : target_(), viewport_({0,0,N64_SCREEN_W,N64_SCREEN_H}), clip_({0,0,N64_SCREEN_W,N64_SCREEN_H}) {}
+render_target_setter::~render_target_setter() {}
+
+// RAII clip setter
+clip_setter::clip_setter(const ::rect&)
+    : c_({0,0,N64_SCREEN_W,N64_SCREEN_H}), clip_enabled_(false) {}
+clip_setter::~clip_setter() {}
+
+// Factory functions returning RAII objects
+render_target_setter set_render_target(const texture& t) {
+    return render_target_setter(t);
+}
+
+clip_setter override_clip(const ::rect& clip) {
+    return clip_setter(clip);
+}
+
+clip_setter reduce_clip(const ::rect& clip) {
+    return clip_setter(clip);
+}
+
+// Tiled drawing — not meaningful on N64, just fill
+void tiled(const texture&, const ::rect& dst, bool, bool) {
+    // On N64 just blit the area with a simple fill since tiling is too expensive
+}
+
+// Smooth-shaded drawing — not available on N64 RDP in this form
+void smooth_shaded(const texture&, const ::rect&,
+    const SDL_Color&, const SDL_Color&,
+    const SDL_Color&, const SDL_Color&,
+    const SDL_FPoint&, const SDL_FPoint&,
+    const SDL_FPoint&, const SDL_FPoint&) {}
+
+void smooth_shaded(const texture&, const ::rect&,
+    const SDL_Color&, const SDL_Color&,
+    const SDL_Color&, const SDL_Color&) {}
+
+void smooth_shaded(const texture&,
+    const std::array<SDL_Vertex, 4>&) {}
+
 } // namespace draw
 
 // -----------------------------------------------------------------------
@@ -116,6 +164,80 @@ void clear_render_target() {}
 // -----------------------------------------------------------------------
 #include "../picture.hpp"
 
+// -----------------------------------------------------------------------
+// image::locator class — N64 implementation
+// -----------------------------------------------------------------------
+namespace image {
+
+locator::locator(const std::string& filename)
+    : type_(filename.empty() ? NONE : FILE), is_data_uri_(false)
+    , filename_(filename), modifications_(), loc_(), center_x_(0), center_y_(0) {}
+
+locator::locator(const std::string& filename, const std::string& modifications)
+    : type_(filename.empty() ? NONE : (modifications.empty() ? FILE : SUB_FILE))
+    , is_data_uri_(false), filename_(filename), modifications_(modifications)
+    , loc_(), center_x_(0), center_y_(0) {}
+
+locator::locator(const std::string& filename, const map_location& loc,
+                 int center_x, int center_y, const std::string& modifications)
+    : type_(SUB_FILE), is_data_uri_(false), filename_(filename)
+    , modifications_(modifications), loc_(loc)
+    , center_x_(center_x), center_y_(center_y) {}
+
+locator locator::clone(const std::string& mods) const {
+    locator l = *this;
+    l.modifications_ += mods;
+    if (!mods.empty() && l.type_ == FILE) l.type_ = SUB_FILE;
+    return l;
+}
+
+bool locator::operator==(const locator& a) const {
+    return type_ == a.type_ && filename_ == a.filename_ &&
+           modifications_ == a.modifications_ && loc_ == a.loc_ &&
+           center_x_ == a.center_x_ && center_y_ == a.center_y_;
+}
+
+bool locator::operator<(const locator& a) const {
+    if (type_ != a.type_) return type_ < a.type_;
+    if (filename_ != a.filename_) return filename_ < a.filename_;
+    return modifications_ < a.modifications_;
+}
+
+std::size_t hash_value(const locator& loc) {
+    std::size_t h = std::hash<std::string>{}(loc.filename_);
+    h ^= std::hash<std::string>{}(loc.modifications_) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    return h;
+}
+
+std::ostream& operator<<(std::ostream& os, const locator& loc) {
+    os << loc.get_filename();
+    if (!loc.get_modifications().empty()) os << "~" << loc.get_modifications();
+    return os;
+}
+
+// image::light_adjust
+light_adjust::light_adjust(int op, int r_, int g_, int b_)
+    : l(static_cast<int8_t>(op)), r(static_cast<int8_t>(r_))
+    , g(static_cast<int8_t>(g_)), b(static_cast<int8_t>(b_)) {}
+
+#ifndef __cpp_impl_three_way_comparison
+bool light_adjust::operator==(const light_adjust& o) const {
+    return l == o.l && r == o.r && g == o.g && b == o.b;
+}
+#endif
+
+// image::manager
+manager::manager() {}
+manager::~manager() { flush_cache(); }
+
+// image::set_color_adjustment — no ToD tint on N64
+void set_color_adjustment(int, int, int) {}
+
+} // namespace image (locator/light_adjust section)
+
+// -----------------------------------------------------------------------
+// image namespace — texture/surface operations (continued)
+// -----------------------------------------------------------------------
 namespace image {
 
 texture get_texture(const locator& loc, TYPE) {
