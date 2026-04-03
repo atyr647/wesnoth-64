@@ -50,10 +50,7 @@ if(N64_BUILD)
         src/ai/composite/goal.cpp
         src/ai/composite/stage.cpp
         src/ai/default/contexts.cpp
-        src/ai/default/stage_combat.cpp
-        src/ai/default/stage_move.cpp
-        src/ai/default/stage_recruit.cpp
-        src/ai/formula/ai.cpp
+        src/ai/default/stage_rca.cpp
         src/ai/lua/core.cpp
         src/ai/lua/engine_lua.cpp
 
@@ -94,7 +91,7 @@ if(N64_BUILD)
         src/game_initialization/connect_engine.cpp
         src/game_initialization/create_engine.cpp
         src/game_initialization/singleplayer.cpp
-        src/game_initialization/configure_engine.cpp
+        src/game_initialization/depcheck.cpp
 
         # --- Game controllers ---
         src/play_controller.cpp
@@ -124,7 +121,7 @@ if(N64_BUILD)
         # --- Pathfinding ---
         src/pathfind/pathfind.cpp
         src/pathfind/teleport.cpp
-        src/pathfind/aststar.cpp
+        src/pathfind/astarsearch.cpp
 
         # --- RNG ---
         src/random.cpp
@@ -187,7 +184,7 @@ if(N64_BUILD)
         src/units/drawer.cpp
         src/units/helper.cpp
         src/units/frame.cpp
-        src/units/ptr.cpp
+        src/units/orb_status.cpp
 
         # --- Team ---
         src/team.cpp
@@ -204,21 +201,20 @@ if(N64_BUILD)
         src/storyscreen/controller.cpp
         src/storyscreen/part.cpp
         src/storyscreen/parser.cpp
-        src/storyscreen/render.cpp
+        # storyscreen/render.cpp does not exist in this version; rendering handled by n64_gui
 
         # --- Other essential modules ---
         src/log.cpp
         src/attack_prediction.cpp
         src/about.cpp
         src/achievements.cpp
-        src/picture.cpp
+        # src/picture.cpp — excluded; image namespace replaced by n64_sdl_wrappers.cpp
         src/minimap.cpp
         src/persist_context.cpp
         src/persist_manager.cpp
         src/persist_var.cpp
         src/statistics.cpp
-        src/statistics_dialog.cpp
-        src/side_controller.cpp
+        # statistics_dialog and side_controller are header-only or don't exist
         src/chat_events.cpp
         src/chat_command_handler.cpp
         src/chat_log.cpp
@@ -232,21 +228,19 @@ if(N64_BUILD)
         src/quit_confirmation.cpp
         src/sound_music_track.cpp
 
-        # --- Filesystem abstraction (N64: routes through n64_romfs) ---
-        src/filesystem.cpp
+        # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
+        # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp
         src/filesystem_common.cpp
 
-        # --- Font (N64: routes through n64_video text drawing) ---
-        src/font/text.cpp
+        # --- Font (N64: text.cpp replaced by n64_font_text.cpp, font_config.cpp uses fontconfig shim) ---
+        # src/font/text.cpp — excluded; replaced by src/n64/n64_font_text.cpp (auto-globbed)
         src/font/font_config.cpp
-        src/font/font_id.cpp
         src/font/sdl_ttf_compat.cpp
         src/font/standard_colors.cpp
-        src/font/marked_up_text.cpp
 
-        # --- Widgets/events shim (minimal for N64) ---
-        src/events.cpp
-        src/draw.cpp
+        # --- SDL wrappers (rect/texture/surface compile via shim; events/draw replaced by N64) ---
+        # src/events.cpp — excluded; replaced by src/n64/n64_events.cpp
+        # src/draw.cpp — excluded; replaced by src/n64/n64_sdl_wrappers.cpp
         src/sdl/rect.cpp
         src/sdl/texture.cpp
         src/sdl/surface.cpp
@@ -273,10 +267,14 @@ if(N64_BUILD)
         LUAI_MAXCSTACK=200      # reduce C stack nesting limit
     )
 
-    # Inject shims: SDL → n64_sdl_shim.hpp, Boost → n64_boost_shim.hpp
+    # Inject shims: SDL → n64_sdl_shim, Boost → n64_boost_shim, plus Pango/Cairo/threading/network/mixer
     target_compile_options(wesnoth_n64 PRIVATE
         -include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_shim.hpp
         -include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_font_shim.hpp
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_network_shim.hpp
+        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp
     )
 
     # Linker script

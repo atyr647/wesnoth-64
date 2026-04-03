@@ -181,39 +181,7 @@ public:
 // =====================================================================
 // loading_screen redirect → N64 loading screen
 // =====================================================================
-#include "../gui/dialogs/loading_screen.hpp"
-
-namespace gui2::dialogs {
-
-loading_screen* loading_screen::singleton_ = nullptr;
-
-void loading_screen::display(std::function<void()> f) {
-    n64_loading_screen_show("Loading...");
-    if (f) f();
-    n64_loading_screen_hide();
-}
-
-bool loading_screen::displaying() { return singleton_ != nullptr; }
-
-void loading_screen::progress(loading_stage stage) {
-    const char* names[] = {
-        "Building terrain...", "Creating cache...", "Init display...",
-        "Init fonts...", "Init teams...", "Init theme...",
-        "Loading config...", "Loading data...", "Loading game...",
-        "Loading map...", "Loading music...", "Loading units...",
-        "Placing units...", "Preparing scenario...", "Running events...",
-        "Verifying cache...", "Starting game...",
-    };
-    int idx = (int)stage;
-    const char* name = (idx >= 0 && idx < (int)(sizeof(names)/sizeof(names[0])))
-                       ? names[idx] : "Loading...";
-    n64_loading_screen_show(name);
-}
-
-void loading_screen::spin() {}
-void loading_screen::raise() {}
-
-} // namespace gui2::dialogs
+// GUI2 dialog stubs: moved to n64_gui2_stubs.cpp
 
 // =====================================================================
 // Help system — simplified text-only unit/terrain info
@@ -319,14 +287,7 @@ void set_UI_volume(int) {}
 
 } // namespace sound
 
-// =====================================================================
-// Image cache — route to N64 texture cache
-// =====================================================================
-namespace image {
-
-void flush_cache() { /* n64_texcache_flush called between scenarios */ }
-
-} // namespace image
+// Image cache: handled by n64_sdl_wrappers.cpp (image namespace)
 
 // =====================================================================
 // Preferences — hardcoded for N64

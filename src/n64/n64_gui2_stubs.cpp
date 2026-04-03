@@ -1,0 +1,140 @@
+/**
+ * n64_gui2_stubs.cpp
+ *
+ * N64 stub implementations for Wesnoth's GUI2 dialog system.
+ *
+ * The PC version uses gui/dialogs/*.cpp with a full widget framework
+ * (80+ dialog classes, layout engine, event system). On N64, all dialogs
+ * are replaced by the modal n64_gui system (simple menus, message boxes).
+ *
+ * This file provides:
+ *   1. gui2 free functions (show_message, show_transient_message, etc.)
+ *   2. loading_screen implementation
+ *   3. modal_dialog base class methods
+ *
+ * The gui2 source files (gui/dialogs/*.cpp, gui/widgets/*.cpp, gui/core/*.cpp)
+ * are NOT included in the N64 build. Only the headers are used for type info.
+ */
+
+#ifdef N64_BUILD
+
+#include "n64_platform.hpp"
+#include "n64_gui.hpp"
+#include "n64_video.hpp"
+
+#include "../gui/dialogs/message.hpp"
+#include "../gui/dialogs/transient_message.hpp"
+#include "../gui/dialogs/loading_screen.hpp"
+#include "../gui/dialogs/modal_dialog.hpp"
+
+#include "../config.hpp"
+
+#include <string>
+#include <functional>
+#include <vector>
+
+// =====================================================================
+// gui2 free functions — message boxes
+// =====================================================================
+namespace gui2 {
+
+void show_message(const std::string& title,
+                  const std::string& message,
+                  const std::string&,
+                  const bool,
+                  const bool,
+                  const bool) {
+    n64_message_box(title.c_str(), message.c_str(), N64_MB_OK);
+}
+
+int show_message(const std::string& title,
+                 const std::string& message,
+                 const dialogs::message::button_style style,
+                 bool, bool) {
+    N64MBType mb = N64_MB_OK;
+    if (style == dialogs::message::yes_no_buttons)
+        mb = N64_MB_YESNO;
+    else if (style == dialogs::message::ok_cancel_buttons)
+        mb = N64_MB_OKCANCEL;
+
+    int result = n64_message_box(title.c_str(), message.c_str(), mb);
+    return result == 0 ? -2 : -1; // OK=-2, Cancel=-1 (gui2 retval convention)
+}
+
+void show_error_message(const std::string& message, bool) {
+    n64_message_box("Error", message.c_str(), N64_MB_OK);
+}
+
+void show_transient_message(const std::string& title,
+                             const std::string& message,
+                             const std::string&,
+                             const bool,
+                             const bool) {
+    n64_message_box(title.empty() ? "Info" : title.c_str(),
+                    message.c_str(), N64_MB_OK);
+}
+
+void show_transient_error_message(const std::string& message, bool) {
+    n64_message_box("Error", message.c_str(), N64_MB_OK);
+}
+
+// =====================================================================
+// modal_dialog base class
+// =====================================================================
+namespace dialogs {
+
+modal_dialog::modal_dialog(const std::string&) {}
+modal_dialog::~modal_dialog() {}
+
+bool modal_dialog::show(const unsigned) {
+    // Default: returns true (OK). Specific dialogs override behavior.
+    return true;
+}
+
+// =====================================================================
+// loading_screen
+// =====================================================================
+loading_screen* loading_screen::singleton_ = nullptr;
+
+void loading_screen::display(std::function<void()> f) {
+    n64_loading_screen_show("Loading...");
+    if (f) f();
+    n64_loading_screen_hide();
+}
+
+bool loading_screen::displaying() {
+    return singleton_ != nullptr;
+}
+
+void loading_screen::progress(loading_stage stage) {
+    const char* names[] = {
+        "Building terrain...", "Creating cache...", "Init display...",
+        "Init fonts...", "Init teams...", "Init theme...",
+        "Loading config...", "Loading data...", "Loading game...",
+        "Loading map...", "Loading music...", "Loading units...",
+        "Placing units...", "Preparing scenario...", "Running events...",
+        "Verifying cache...", "Starting game...",
+    };
+    int idx = static_cast<int>(stage);
+    const char* name = (idx >= 0 && idx < static_cast<int>(sizeof(names)/sizeof(names[0])))
+                       ? names[idx] : "Loading...";
+    n64_loading_screen_show(name);
+}
+
+void loading_screen::spin() {}
+void loading_screen::raise() {}
+
+} // namespace dialogs
+
+// =====================================================================
+// retval constants (used by game code to check dialog results)
+// =====================================================================
+namespace retval {
+    const int OK = -2;
+    const int CANCEL = -1;
+    const int NONE = 0;
+}
+
+} // namespace gui2
+
+#endif // N64_BUILD
