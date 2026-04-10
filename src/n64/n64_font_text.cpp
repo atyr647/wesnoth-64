@@ -281,11 +281,7 @@ std::pair<int, int> pango_text::index_to_line_x(const unsigned offset, const boo
     return {line, x * PANGO_SCALE};
 }
 
-unsigned pango_text::get_lines_count() const {
-    int lines = 0;
-    measure_text(text_, maximum_width_, maximum_height_, nullptr, nullptr, &lines);
-    return lines > 0 ? lines : 1;
-}
+// get_lines_count() is defined inline in text.hpp
 
 // -----------------------------------------------------------------------
 // Setters

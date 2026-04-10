@@ -44,6 +44,14 @@
 #define PANGO_PANGO_H_INSIDE
 #define PANGO_PANGOCAIRO_H_INSIDE
 
+// Block our own stub headers in src/n64/sdl2_stubs/pango/
+#define PANGO_LAYOUT_H_STUB
+#define PANGO_ENUM_TYPES_H_STUB
+#define PANGO_FONT_H_STUB
+#define PANGO_CONTEXT_H_STUB
+#define PANGO_TYPES_H_STUB
+#define PANGO_ATTRIBUTES_H_STUB
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -64,6 +72,8 @@ inline void g_object_unref(void*) {}
 
 // Pango scale factor (same as real Pango)
 #define PANGO_SCALE 1024
+#define PANGO_ATTR_INDEX_FROM_TEXT_BEGINNING 0
+#define PANGO_ATTR_INDEX_TO_TEXT_END ((guint)0xFFFFFFFF)
 
 // PangoRectangle
 struct PangoRectangle {
@@ -118,13 +128,17 @@ enum PangoUnderline {
 // Forward-declare opaque Pango types
 struct PangoContext {};
 struct PangoLayout {};
-struct PangoLayoutLine {};
+struct PangoLayoutLine { int start_index; int length; };
 struct PangoLayoutIter {};
 struct PangoFontMap {};
 struct PangoFontDescription {};
 struct PangoColor { guint16 red; guint16 green; guint16 blue; };
 struct PangoAttrList {};
-struct PangoAttribute {};
+struct PangoAttribute {
+    guint start_index;
+    guint end_index;
+};
+typedef void (*GDestroyNotify)(gpointer data);
 struct PangoAttrShape {
     PangoRectangle ink_rect;
     PangoRectangle logical_rect;
@@ -212,17 +226,44 @@ inline void pango_font_description_set_size(PangoFontDescription*, int) {}
 inline void pango_font_description_set_weight(PangoFontDescription*, PangoWeight) {}
 inline void pango_font_description_set_style(PangoFontDescription*, PangoStyle) {}
 inline int pango_font_description_get_size(const PangoFontDescription*) { return 12 * PANGO_SCALE; }
+inline const char* pango_font_description_get_family(const PangoFontDescription*) { return "sans"; }
+inline PangoWeight pango_font_description_get_weight(const PangoFontDescription*) { return PANGO_WEIGHT_NORMAL; }
+inline PangoStyle pango_font_description_get_style(const PangoFontDescription*) { return PANGO_STYLE_NORMAL; }
+inline PangoFontDescription* pango_font_description_copy(const PangoFontDescription*) { return nullptr; }
+
+inline PangoFontMap* pango_context_get_font_map(PangoContext*) { return nullptr; }
 
 // Attribute list
 inline PangoAttrList* pango_attr_list_new() { return nullptr; }
+
+inline gboolean pango_parse_markup(const char*, int, guint,
+    PangoAttrList** attr_list, char** text, guint* accel_char, void** error) {
+    if (attr_list) *attr_list = pango_attr_list_new();
+    if (text) *text = nullptr;
+    if (accel_char) *accel_char = 0;
+    if (error) *error = nullptr;
+    return 1;
+}
 inline void pango_attr_list_unref(PangoAttrList*) {}
 inline void pango_attr_list_insert(PangoAttrList*, PangoAttribute*) {}
 
-inline PangoAttribute* pango_attr_foreground_new(guint, guint, guint) { return nullptr; }
-inline PangoAttribute* pango_attr_underline_new(PangoUnderline) { return nullptr; }
-inline PangoAttribute* pango_attr_weight_new(PangoWeight) { return nullptr; }
-inline PangoAttribute* pango_attr_style_new(PangoStyle) { return nullptr; }
-inline PangoAttribute* pango_attr_size_new(int) { return nullptr; }
+inline PangoAttribute* pango_attr_foreground_new(guint, guint, guint) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_background_new(guint, guint, guint) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_underline_new(PangoUnderline) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_weight_new(PangoWeight) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_style_new(PangoStyle) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_size_new(int) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_size_new_absolute(int) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_family_new(const char*) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_line_height_new(double) { static PangoAttribute a{}; return &a; }
+inline PangoAttribute* pango_attr_shape_new_with_data(
+    const PangoRectangle*, const PangoRectangle*,
+    gpointer, GDestroyNotify, GDestroyNotify) { static PangoAttribute a{}; return &a; }
+inline void pango_attribute_destroy(PangoAttribute*) {}
+inline PangoAttribute* pango_attribute_copy(const PangoAttribute*) { static PangoAttribute a{}; return &a; }
+inline PangoAttrList* pango_attr_list_ref(PangoAttrList* l) { return l; }
+inline void pango_attr_list_change(PangoAttrList*, PangoAttribute*) {}
+inline void pango_attr_list_splice(PangoAttrList*, PangoAttrList*, int, int) {}
 
 // Cairo-Pango bridge
 inline void pango_cairo_context_set_resolution(PangoContext*, double) {}

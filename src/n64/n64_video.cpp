@@ -18,6 +18,10 @@
 #  include <rdpq.h>
 #  include <rdpq_tex.h>
 #  include <rdpq_mode.h>
+// Redefine RGBA32 to use libdragon_color_t instead of color_t
+// (the original macro expands to (color_t){...} which conflicts with Wesnoth's color_t)
+#  undef RGBA32
+#  define RGBA32(rx,gx,bx,ax) ((libdragon_color_t){.r=(rx), .g=(gx), .b=(bx), .a=(ax)})
 #endif
 
 // -----------------------------------------------------------------------
@@ -50,8 +54,8 @@ struct DrawCmd {
     };
 };
 
-// Per-layer command queues (max 1024 commands per layer per frame)
-static constexpr size_t CMD_QUEUE_CAP = 1024;
+// Per-layer command queues (max 256 commands per layer per frame)
+static constexpr size_t CMD_QUEUE_CAP = 256;
 static DrawCmd s_cmds[LAYER_COUNT][CMD_QUEUE_CAP];
 static u32     s_cmd_count[LAYER_COUNT];
 
@@ -130,7 +134,7 @@ void n64_video_flip() {
 void n64_video_clear(N64Color c) {
 #ifdef N64_BUILD
     if (!s_disp) s_disp = display_get();
-    rdpq_attach_clear(s_disp, nullptr, c.v);
+    rdpq_attach_clear(s_disp, nullptr);
 #endif
 }
 

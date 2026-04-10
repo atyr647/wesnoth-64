@@ -50,17 +50,17 @@ std::vector<color_t> recolor_palette(const color_range& new_range, utils::span<c
 			float old_ratio = static_cast<float>(old_avg) / reference_avg;
 
 			clist.emplace_back(
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.r + (1 - old_ratio) * min_c.r)),
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.g + (1 - old_ratio) * min_c.g)),
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.b + (1 - old_ratio) * min_c.b))
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.r + (1 - old_ratio) * min_c.r)),
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.g + (1 - old_ratio) * min_c.g)),
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.b + (1 - old_ratio) * min_c.b))
 			);
 		} else if(reference_avg != 255) {
 			float old_ratio = (255.0f - static_cast<float>(old_avg)) / (255.0f - reference_avg);
 
 			clist.emplace_back(
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.r + (1 - old_ratio) * max_c.r)),
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.g + (1 - old_ratio) * max_c.g)),
-				std::min(255u, static_cast<uint32_t>(old_ratio * mid_c.b + (1 - old_ratio) * max_c.b))
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.r + (1 - old_ratio) * max_c.r)),
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.g + (1 - old_ratio) * max_c.g)),
+				std::min(uint32_t(255), static_cast<uint32_t>(old_ratio * mid_c.b + (1 - old_ratio) * max_c.b))
 			);
 		}
 	}

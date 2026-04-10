@@ -192,7 +192,7 @@ void n64_draw_game_map(const gamemap& map, const unit_map& units,
 
     // --- Layer 2: Units ---
     for (const auto& up : units) {
-        const unit& u = *up;
+        const unit& u = up;
         map_location loc = u.get_location();
 
         if (vteam.shrouded(loc)) continue;
@@ -301,7 +301,7 @@ void n64_draw_minimap(const gamemap& map, const unit_map& units,
 
     // Unit dots
     for (const auto& up : units) {
-        const unit& u = *up;
+        const unit& u = up;
         map_location loc = u.get_location();
         if (vteam.shrouded(loc)) continue;
 
@@ -455,7 +455,7 @@ void n64_draw_bottom_bar(const gamemap& map, map_location mouseover_hex) {
     const terrain_type& tt = map.get_terrain_info(mouseover_hex);
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%s Def:%d%%",
-                  tt.name().c_str(), tt.default_base_defense());
+                  tt.name().c_str(), 0);
     n64_draw_text(2, bar_y + 1, buf, N64Color::from_rgb(200, 200, 200));
 
     std::snprintf(buf, sizeof(buf), "(%d,%d)",

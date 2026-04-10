@@ -140,6 +140,13 @@ public:
     bool try_lock_until(const chrono::time_point<Clock, Duration>&) { return true; }
 };
 
+struct defer_lock_t { explicit defer_lock_t() = default; };
+struct try_to_lock_t { explicit try_to_lock_t() = default; };
+struct adopt_lock_t { explicit adopt_lock_t() = default; };
+inline constexpr defer_lock_t defer_lock{};
+inline constexpr try_to_lock_t try_to_lock{};
+inline constexpr adopt_lock_t adopt_lock{};
+
 template<typename Mutex>
 class lock_guard {
 public:
@@ -178,6 +185,15 @@ public:
     explicit operator bool() const noexcept { return owns_; }
     Mutex* mutex() const noexcept { return pm_; }
     Mutex* release() noexcept { auto* m = pm_; pm_ = nullptr; owns_ = false; return m; }
+};
+
+template<typename... Mutexes>
+class scoped_lock {
+public:
+    explicit scoped_lock(Mutexes&...) {}
+    ~scoped_lock() = default;
+    scoped_lock(const scoped_lock&) = delete;
+    scoped_lock& operator=(const scoped_lock&) = delete;
 };
 
 template<typename Mutex>

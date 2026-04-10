@@ -30,11 +30,13 @@
 #include "n64_platform.hpp"
 #include "n64_video.hpp"
 #include "n64_gui.hpp"
+#include "n64_romfs.hpp"
 
 #include "../config.hpp"
 #include "../color.hpp"
 #include "../sdl/surface.hpp"
 #include "../sound_music_track.hpp"
+#include "../units/types.hpp"
 #include "../utils/optional_fwd.hpp"
 
 #include <string>
@@ -55,12 +57,9 @@ static int s_next_label_id = 1;
 floating_label::floating_label(const std::string& text)
     : text_(text) {}
 
-void floating_label::set_font_size(int) {}
-void floating_label::set_color(const color_t&) {}
-void floating_label::set_bg_color(const color_t&) {}
-void floating_label::set_border_size(int) {}
-void floating_label::set_position(double, double) {}
-void floating_label::set_move(double, double) {}
+// set_font_size, set_color, set_bg_color, set_border_size, set_position, set_move
+// are all defined inline in floating_label.hpp — don't redefine
+
 void floating_label::set_lifetime(const std::chrono::milliseconds& lifetime,
                                    const std::chrono::milliseconds& fadeout) {
     lifetime_ = lifetime;
@@ -97,7 +96,6 @@ rect get_floating_label_rect(int) { return {0,0,0,0}; }
 namespace halo {
 
 manager::manager() {}
-manager::~manager() {}
 handle manager::add(int, int, const std::string&, const map_location&,
                      ORIENTATION, bool) {
     return handle();
@@ -108,9 +106,7 @@ void manager::update() {}
 void manager::render(const rect&) {}
 
 halo_record::halo_record() {}
-halo_record::halo_record(const halo_record&) = default;
 halo_record::~halo_record() {}
-bool halo_record::valid() const { return false; }
 
 } // namespace halo
 
@@ -166,20 +162,7 @@ namespace clipboard {
 } // clipboard
 } // desktop
 
-// =====================================================================
-// Whiteboard — disabled on N64
-// =====================================================================
-namespace wb {
-
-class manager {
-public:
-    manager() {}
-    ~manager() {}
-    bool active() const { return false; }
-    void set_active(bool) {}
-};
-
-} // namespace wb
+// Whiteboard class is defined in n64_stubs.cpp below (after #include of manager.hpp)
 
 // =====================================================================
 // loading_screen redirect → N64 loading screen
@@ -193,10 +176,22 @@ public:
 
 namespace help {
 
+// help_manager has a private constructor; use a custom shared_ptr
 std::shared_ptr<help_manager> help_manager::get_instance() {
-    static auto inst = std::make_shared<help_manager>();
-    return inst;
+    auto existing = singleton_.lock();
+    if (!existing) {
+        // Use a private-accessible raw new since we're a member function
+        existing.reset(new help_manager());
+        singleton_ = existing;
+    }
+    return existing;
 }
+
+// Define the pimpl type so unique_ptr<implementation> destructor works
+class help_manager::implementation {};
+
+help_manager::help_manager() {}
+help_manager::~help_manager() {}
 
 void show_help(const std::string& topic) {
     n64_message_box("Help", "Topic: " + topic + "\n\n(Help browser not available on N64)");
@@ -212,8 +207,7 @@ void show_unit_description(const unit_type& type) {
 }
 
 void show_terrain_description(const terrain_type& tt) {
-    std::string msg = tt.name() + "\n"
-        "Defense: " + std::to_string(tt.default_base_defense()) + "%";
+    std::string msg = "Terrain info";
     n64_message_box("Terrain Info", msg);
 }
 
@@ -300,14 +294,11 @@ void reset_sound() {}
 void close_sound() {}
 bool init_sound() { return true; }
 
-// music_thinker
-music_thinker::music_thinker() {}
-music_thinker::~music_thinker() {}
-void music_thinker::process(events::pump_info&) { n64_audio_update(); }
+// music_thinker — ctor/dtor are implicit (inherits pump_monitor)
+void music_thinker::process() { n64_audio_update(); }
 
-// music_muter
+// music_muter — handle_event is inline in header
 music_muter::music_muter() : sdl_handler(false) {}
-void music_muter::handle_event(const SDL_Event&) {}
 void music_muter::handle_window_event(const SDL_Event&) {}
 
 } // namespace sound
@@ -400,10 +391,28 @@ surface read_pixels_low_res(rect*) { return surface(); }
 
 // =====================================================================
 // whiteboard (wb::) structs — disabled on N64
+// Whiteboard uses boost::multi_index which is not available on N64.
+// We provide forward declarations and stub implementations here
+// without including the real headers.
 // =====================================================================
-#include "../whiteboard/manager.hpp"
 
+// Forward declare the whiteboard types we need to stub
 namespace wb {
+
+class future_map {
+    bool initial_planned_unit_map_;
+public:
+    future_map();
+    ~future_map();
+};
+
+class future_map_if_active {
+    bool initial_planned_unit_map_;
+    bool whiteboard_active_;
+public:
+    future_map_if_active();
+    ~future_map_if_active();
+};
 
 future_map::future_map() : initial_planned_unit_map_(false) {}
 future_map::~future_map() {}
@@ -431,5 +440,152 @@ std::function<rect(rect)> prep_minimap_for_rendering(
 }
 
 } // namespace image
+
+// =====================================================================
+// Additional font:: stubs
+// =====================================================================
+namespace font {
+
+int get_max_height(unsigned size, font::family_class, pango_text::FONT_STYLE) {
+    // Return approximate line height based on size
+    return (int)size + 4;
+}
+
+floating_label_context::floating_label_context() {}
+floating_label_context::~floating_label_context() {}
+
+rect floating_label::get_bg_rect(const rect& text_rect) const {
+    // Return text rect with small padding
+    rect r = text_rect;
+    r.x -= 2; r.y -= 2;
+    r.w += 4; r.h += 4;
+    return r;
+}
+
+} // namespace font
+
+// =====================================================================
+// Additional image:: stubs
+// =====================================================================
+#include "../picture.hpp"
+
+namespace image {
+
+bool is_in_hex(const locator&) { return false; }
+bool is_empty_hex(const locator&) { return true; }
+bool precached_file_exists(const std::string&) { return false; }
+void precache_file_existence(const std::string&) {}
+save_result save_image(const surface&, const std::string&) { return save_result::unsupported_format; }
+void n64_display_flush_caches() {}
+
+} // namespace image
+
+// =====================================================================
+// Additional video:: stubs
+// =====================================================================
+namespace video {
+
+std::string current_driver() { return "n64"; }
+std::vector<std::pair<std::string, std::string>> renderer_report() {
+    return {{"renderer", "N64 libdragon"}};
+}
+std::vector<std::string> enumerate_drivers() { return {"n64"}; }
+int native_refresh_rate() { return 60; }
+int current_refresh_rate() { return 60; }
+std::pair<float, float> get_dpi() { return {72.0f, 72.0f}; }
+
+} // namespace video
+
+// =====================================================================
+// translation:: stubs
+// =====================================================================
+#include "../gettext.hpp"
+
+// Define static id for boost::locale::info facet
+std::locale::id boost::locale::info::id;
+
+namespace translation {
+
+const boost::locale::info& get_effective_locale_info() {
+    // Return a reference to a statically-allocated dummy.
+    // We allocate on heap because std::locale::facet has protected dtor semantics.
+    static const boost::locale::info* dummy = new boost::locale::info();
+    return *dummy;
+}
+
+bool ci_search(const std::string& a, const std::string& b) {
+    return a.find(b) != std::string::npos;
+}
+
+bool ci_search(utils::span<const std::string> haystack, const std::string& needle) {
+    for (const auto& s : haystack) {
+        if (s.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
+} // namespace translation
+
+// =====================================================================
+// game_config:: globals
+// =====================================================================
+// Include filesystem.hpp so that the following definitions match the
+// extern declarations (and get external linkage + cxx11 ABI tag).
+#include "../filesystem.hpp"
+namespace game_config {
+std::string path = "";
+const std::string observer_team_name = "observer";
+int cache_compression_level = 6;
+} // namespace game_config
+
+// =====================================================================
+// draw:: stubs — most drawing done via n64_video directly
+// =====================================================================
+#include "../draw.hpp"
+
+namespace draw {
+
+void fill(const ::rect&) {}
+void fill(const ::rect&, uint8_t, uint8_t, uint8_t) {}
+void fill(const SDL_FRect&, const color_t&) {}
+void fill(uint8_t, uint8_t, uint8_t) {}
+void rect(const ::rect&) {}
+void rect(const ::rect&, uint8_t, uint8_t, uint8_t) {}
+void line(int, int, int, int) {}
+void circle(int, int, int, uint8_t) {}
+void disc(int, int, int, uint8_t) {}
+void cairo_circle(int, int, int, const color_t&, int) {}
+void cairo_disc(int, int, int, const color_t&) {}
+void set_color(const color_t&) {}
+void blit(const texture&) {}
+void tiled_highres(const texture&, const ::rect&, bool, bool) {}
+void flipped(const texture&, const ::rect&, bool, bool) {}
+
+viewport_setter::viewport_setter(const ::rect& v) : v_(v), c_{}, clip_enabled_(false) {}
+viewport_setter::~viewport_setter() {}
+
+viewport_setter set_viewport(const ::rect& v) { return viewport_setter(v); }
+
+} // namespace draw
+
+// =====================================================================
+// gui::floating_textbox — disabled on N64
+// =====================================================================
+#include "../floating_textbox.hpp"
+
+namespace gui {
+
+floating_textbox::floating_textbox() {}
+void floating_textbox::close() {}
+void floating_textbox::show(TEXTBOX_MODE, const std::string&, const std::string&, bool, game_display&) {}
+void floating_textbox::tab(const std::set<std::string>&) {}
+void floating_textbox::memorize_command(const std::string&) {}
+
+} // namespace gui
+
+// =====================================================================
+// Misc single symbols
+// =====================================================================
+bool ad_hoc_addon_fetch_session(const std::vector<std::string>&) { return false; }
 
 #endif // N64_BUILD

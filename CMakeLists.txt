@@ -25,7 +25,7 @@ if(N64_BUILD)
     set(ENABLE_GAME            ON  CACHE BOOL "" FORCE)
 
     # N64 game target
-    file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp")
+    file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp" "src/n64/*.c")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
@@ -346,55 +346,340 @@ if(N64_BUILD)
         src/sdl/surface.cpp
         src/sdl/utils.cpp
         src/sdl/input.cpp
+
+        # --- Additional sources for linker resolution ---
+        src/addon/info.cpp
+        src/addon/manager.cpp
+        src/addon/state.cpp
+        src/addon/validation.cpp
+        src/config_attribute_value.cpp
+        src/countdown_clock.cpp
+        src/deprecation.cpp
+        src/desktop/battery_info.cpp
+        src/desktop/clipboard.cpp
+        src/desktop/notifications.cpp
+        src/desktop/open.cpp
+        src/desktop/paths.cpp
+        src/desktop/version.cpp
+        src/draw_manager.cpp
+        src/font/constants.cpp
+        src/format_time_summary.cpp
+        src/formula/debugger.cpp
+        src/formula/debugger_fwd.cpp
+        src/formula/function_gamestate.cpp
+        src/formula/tokenizer.cpp
+        src/formula/variant.cpp
+        src/formula/variant_value.cpp
+        src/game_events/manager_impl.cpp
+        src/game_events/menu_item.cpp
+        src/game_initialization/flg_manager.cpp
+        src/game_initialization/lobby_data.cpp
+        src/game_initialization/lobby_info.cpp
+        src/game_initialization/mp_game_utils.cpp
+        src/generic_event.cpp
+        src/gui/auxiliary/iterator/iterator.cpp
+        src/gui/auxiliary/iterator/walker_container.cpp
+        src/gui/auxiliary/iterator/walker_grid.cpp
+        src/gui/auxiliary/iterator/walker_scrollbar_container.cpp
+        src/gui/auxiliary/iterator/walker_tree_node.cpp
+        src/gui/auxiliary/iterator/walker_widget.cpp
+        src/gui/auxiliary/tips.cpp
+        src/gui/core/event/distributor.cpp
+        src/gui/core/gui_definition.cpp
+        src/gui/core/linked_group_definition.cpp
+        src/gui/core/placer.cpp
+        src/gui/core/placer/horizontal_list.cpp
+        src/gui/core/placer/vertical_list.cpp
+        src/gui/core/tracked_drawable.cpp
+        src/gui/core/widget_definition.cpp
+        src/gui/core/window_builder.cpp
+        src/gui/core/window_builder/helper.cpp
+        src/gui/core/window_builder/instance.cpp
+        src/gui/dialogs/achievements_dialog.cpp
+        src/gui/dialogs/addon/addon_auth.cpp
+        src/gui/dialogs/addon/addon_server_info.cpp
+        src/gui/dialogs/addon/connect.cpp
+        src/gui/dialogs/addon/install_dependencies.cpp
+        src/gui/dialogs/addon/license_prompt.cpp
+        src/gui/dialogs/addon/manager.cpp
+        src/gui/dialogs/addon/uninstall_list.cpp
+        src/gui/dialogs/attack_predictions.cpp
+        src/gui/dialogs/campaign_difficulty.cpp
+        src/gui/dialogs/campaign_selection.cpp
+        src/gui/dialogs/chat_log.cpp
+        src/gui/dialogs/core_selection.cpp
+        src/gui/dialogs/debug_clock.cpp
+        src/gui/dialogs/depcheck_confirm_change.cpp
+        src/gui/dialogs/depcheck_select_new.cpp
+        src/gui/dialogs/drop_down_menu.cpp
+        src/gui/dialogs/edit_label.cpp
+        src/gui/dialogs/edit_text.cpp
+        src/gui/dialogs/editor/choose_addon.cpp
+        src/gui/dialogs/editor/custom_tod.cpp
+        src/gui/dialogs/editor/edit_label.cpp
+        src/gui/dialogs/editor/edit_pbl.cpp
+        src/gui/dialogs/editor/edit_pbl_translation.cpp
+        src/gui/dialogs/editor/edit_scenario.cpp
+        src/gui/dialogs/editor/edit_side.cpp
+        src/gui/dialogs/editor/edit_unit.cpp
+        src/gui/dialogs/editor/generate_map.cpp
+        src/gui/dialogs/editor/generator_settings.cpp
+        src/gui/dialogs/editor/new_map.cpp
+        src/gui/dialogs/editor/resize_map.cpp
+        src/gui/dialogs/editor/tod_new_schedule.cpp
+        src/gui/dialogs/end_credits.cpp
+        src/gui/dialogs/file_dialog.cpp
+        src/gui/dialogs/file_progress.cpp
+        src/gui/dialogs/folder_create.cpp
+        src/gui/dialogs/formula_debugger.cpp
+        src/gui/dialogs/fps_report.cpp
+        src/gui/dialogs/game_cache_options.cpp
+        src/gui/dialogs/game_delete.cpp
+        src/gui/dialogs/game_load.cpp
+        src/gui/dialogs/game_save.cpp
+        src/gui/dialogs/game_stats.cpp
+        src/gui/dialogs/game_version_dialog.cpp
+        src/gui/dialogs/gamestate_inspector.cpp
+        src/gui/dialogs/gui_test_dialog.cpp
+        src/gui/dialogs/help_browser.cpp
+        src/gui/dialogs/hotkey_bind.cpp
+        src/gui/dialogs/label_settings.cpp
+        src/gui/dialogs/language_selection.cpp
+        src/gui/dialogs/loading_screen.cpp
+        src/gui/dialogs/log_settings.cpp
+        src/gui/dialogs/lua_interpreter.cpp
+        src/gui/dialogs/message.cpp
+        src/gui/dialogs/migrate_version_selection.cpp
+        src/gui/dialogs/modeless_dialog.cpp
+        src/gui/dialogs/multiplayer/faction_select.cpp
+        src/gui/dialogs/multiplayer/lobby.cpp
+        src/gui/dialogs/multiplayer/lobby_player_list_helper.cpp
+        src/gui/dialogs/multiplayer/match_history.cpp
+        src/gui/dialogs/multiplayer/mp_alerts_options.cpp
+        src/gui/dialogs/multiplayer/mp_change_control.cpp
+        src/gui/dialogs/multiplayer/mp_connect.cpp
+        src/gui/dialogs/multiplayer/mp_create_game.cpp
+        src/gui/dialogs/multiplayer/mp_host_game_prompt.cpp
+        src/gui/dialogs/multiplayer/mp_join_game.cpp
+        src/gui/dialogs/multiplayer/mp_join_game_password_prompt.cpp
+        src/gui/dialogs/multiplayer/mp_login.cpp
+        src/gui/dialogs/multiplayer/mp_method_selection.cpp
+        src/gui/dialogs/multiplayer/mp_options_helper.cpp
+        src/gui/dialogs/multiplayer/mp_report.cpp
+        src/gui/dialogs/multiplayer/mp_staging.cpp
+        src/gui/dialogs/multiplayer/player_info.cpp
+        src/gui/dialogs/multiplayer/player_list_helper.cpp
+        src/gui/dialogs/multiplayer/synced_choice_wait.cpp
+        src/gui/dialogs/network_transmission.cpp
+        src/gui/dialogs/outro.cpp
+        src/gui/dialogs/preferences_dialog.cpp
+        src/gui/dialogs/prompt.cpp
+        src/gui/dialogs/reachmap_options.cpp
+        src/gui/dialogs/screenshot_notification.cpp
+        src/gui/dialogs/select_orb_colors.cpp
+        src/gui/dialogs/server_info_dialog.cpp
+        src/gui/dialogs/simple_item_selector.cpp
+        src/gui/dialogs/sp_options_configure.cpp
+        src/gui/dialogs/statistics_dialog.cpp
+        src/gui/dialogs/story_viewer.cpp
+        src/gui/dialogs/surrender_quit.cpp
+        src/gui/dialogs/terrain_layers.cpp
+        src/gui/dialogs/theme_list.cpp
+        src/gui/dialogs/title_screen.cpp
+        src/gui/dialogs/tooltip.cpp
+        src/gui/dialogs/transient_message.cpp
+        src/gui/dialogs/unit_advance.cpp
+        src/gui/dialogs/unit_attack.cpp
+        src/gui/dialogs/units_dialog.cpp
+        src/gui/dialogs/wml_error.cpp
+        src/gui/dialogs/wml_message.cpp
+        src/gui/gui.cpp
+        src/gui/widgets/addon_list.cpp
+        src/gui/widgets/button.cpp
+        src/gui/widgets/chatbox.cpp
+        src/gui/widgets/combobox.cpp
+        src/gui/widgets/debug.cpp
+        src/gui/widgets/drawing.cpp
+        src/gui/widgets/generator.cpp
+        src/gui/widgets/horizontal_scrollbar.cpp
+        src/gui/widgets/image.cpp
+        src/gui/widgets/label.cpp
+        src/gui/widgets/listbox.cpp
+        src/gui/widgets/matrix.cpp
+        src/gui/widgets/menu_button.cpp
+        src/gui/widgets/minimap.cpp
+        src/gui/widgets/multi_page.cpp
+        src/gui/widgets/multiline_text.cpp
+        src/gui/widgets/multimenu_button.cpp
+        src/gui/widgets/pane.cpp
+        src/gui/widgets/password_box.cpp
+        src/gui/widgets/progress_bar.cpp
+        src/gui/widgets/repeating_button.cpp
+        src/gui/widgets/rich_label.cpp
+        src/gui/widgets/scroll_label.cpp
+        src/gui/widgets/scroll_text.cpp
+        src/gui/widgets/scrollbar.cpp
+        src/gui/widgets/scrollbar_container.cpp
+        src/gui/widgets/scrollbar_panel.cpp
+        src/gui/widgets/size_lock.cpp
+        src/gui/widgets/slider.cpp
+        src/gui/widgets/slider_base.cpp
+        src/gui/widgets/spacer.cpp
+        src/gui/widgets/spinner.cpp
+        src/gui/widgets/stacked_widget.cpp
+        src/gui/widgets/tab_container.cpp
+        src/gui/widgets/text_box.cpp
+        src/gui/widgets/text_box_base.cpp
+        src/gui/widgets/toggle_button.cpp
+        src/gui/widgets/toggle_panel.cpp
+        src/gui/widgets/tree_view.cpp
+        src/gui/widgets/tree_view_node.cpp
+        src/gui/widgets/unit_preview_pane.cpp
+        src/gui/widgets/vertical_scrollbar.cpp
+        src/gui/widgets/viewport.cpp
+        src/gui/widgets/widget_helpers.cpp
+        src/halo.cpp
+        src/hotkey/hotkey_handler_mp.cpp
+        src/hotkey/hotkey_handler_sp.cpp
+        src/key.cpp
+        src/lua_jailbreak_exception.cpp
+        src/movetype.cpp
+        src/mt_rng.cpp
+        src/pathutils.cpp
+        src/playturn_network_adapter.cpp
+        src/replay_controller.cpp
+        src/replay_recorder_base.cpp
+        src/save_blocker.cpp
+        src/scripting/debug_lua.cpp
+        src/scripting/lua_attributes.cpp
+        src/scripting/lua_color.cpp
+        src/scripting/lua_mathx.cpp
+        src/scripting/lua_rng.cpp
+        src/scripting/lua_stringx.cpp
+        src/scripting/lua_unit_type.cpp
+        src/scripting/lua_widget.cpp
+        src/scripting/lua_widget_attributes.cpp
+        src/scripting/lua_widget_methods.cpp
+        src/scripting/mapgen_lua_kernel.cpp
+        src/scripting/plugins/context.cpp
+        src/scripting/plugins/manager.cpp
+        src/sdl/exception.cpp
+        src/sdl/point.cpp
+        src/seed_rng.cpp
+        src/serialization/schema/key.cpp
+        src/serialization/schema/tag.cpp
+        src/serialization/schema/type.cpp
+        src/soundsource.cpp
+        src/statistics_record.cpp
+        src/synced_user_choice.cpp
+        src/teambuilder.cpp
+        src/utils/charconv.cpp
+        src/whiteboard/action.cpp
+        src/whiteboard/attack.cpp
+        src/whiteboard/highlighter.cpp
+        src/whiteboard/manager.cpp
+        src/whiteboard/mapbuilder.cpp
+        src/whiteboard/move.cpp
+        src/whiteboard/recall.cpp
+        src/whiteboard/recruit.cpp
+        src/whiteboard/side_actions.cpp
+        src/whiteboard/suppose_dead.cpp
+        src/whiteboard/utility.cpp
+        src/widgets/button.cpp
+        src/widgets/scrollarea.cpp
+        src/widgets/scrollbar.cpp
+        src/widgets/textbox.cpp
+        src/widgets/widget.cpp
+        src/xBRZ/xbrz.cpp
     )
 
-    # Lua submodule (same C files as PC build, stripped of OS/file I/O)
+    # Lua submodule — built as a separate C library (no C++ shims)
     file(GLOB LUA_SOURCES "src/modules/lua/*.c")
     list(FILTER LUA_SOURCES EXCLUDE REGEX ".*(liolib|loslib|loadlib|lua\\.c|luac\\.c).*")
 
-    add_executable(wesnoth_n64 ${N64_GAME_SOURCES} ${LUA_SOURCES})
+    add_library(wesnoth_n64_lua STATIC ${LUA_SOURCES})
+    target_include_directories(wesnoth_n64_lua PRIVATE
+        src/modules/lua/
+        ${N64_INST}/include
+    )
+    target_compile_definitions(wesnoth_n64_lua PRIVATE
+        N64_BUILD=1
+        LUA_32BITS=1
+        LUA_USE_LONGJMP=1
+        LUA_MAXSTACK=512
+        LUAI_MAXCSTACK=200
+    )
+
+    add_executable(wesnoth_n64 ${N64_GAME_SOURCES})
 
     target_include_directories(wesnoth_n64 PRIVATE
         src/
         src/n64/
+        src/n64/sdl2_stubs/
         src/modules/lua/
         ${N64_INST}/include
     )
 
     target_compile_definitions(wesnoth_n64 PRIVATE
         N64_BUILD=1
+        LUA_32BITS=1            # use 32-bit integers/floats in Lua (N64 is 32-bit)
         LUA_USE_LONGJMP=1       # use longjmp for Lua errors (no C++ exceptions on N64)
         LUA_MAXSTACK=512        # reduce Lua stack from default 15000
         LUAI_MAXCSTACK=200      # reduce C stack nesting limit
     )
 
     # Inject shims: SDL → n64_sdl_shim, Boost → n64_boost_shim, plus Pango/Cairo/threading/network/mixer
+    # Only apply to C++ sources; C sources (like n64_libgcc.c) cannot consume C++ headers.
     target_compile_options(wesnoth_n64 PRIVATE
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_shim.hpp
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_font_shim.hpp
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_network_shim.hpp
-        -include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_font_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_network_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp>"
     )
 
-    # Linker script
+    # Linker script — use libdragon's standard n64.ld
+    # --allow-multiple-definition: n64 stubs intentionally override real
+    # implementations for symbols that won't work on N64. Stubs are linked
+    # first (via N64_PLATFORM_SOURCES at the head of the source list), so
+    # they take precedence under this flag.
     target_link_options(wesnoth_n64 PRIVATE
-        -T ${CMAKE_SOURCE_DIR}/src/n64/wesnoth_n64.ld
+        -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld
+        -Wl,--gc-sections
+        -Wl,--allow-multiple-definition
+        -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64.map
     )
+
+    # Build with -Oz (aggressive size opt) + LTO to fit the 8 MiB N64 RAM
+    # budget. Wesnoth refuses to compile with NDEBUG (asserts are required),
+    # so we only pass -Oz and not -DNDEBUG.
+    # -fno-asynchronous-unwind-tables -fno-unwind-tables drop .eh_frame /
+    # .gcc_except_table which add ~1MB of unwind data we cannot afford.
+    # (Wesnoth uses dynamic_cast so we cannot disable RTTI.)
+    target_compile_options(wesnoth_n64 PRIVATE
+        -Oz -flto=auto -ffat-lto-objects
+        -fno-asynchronous-unwind-tables -fno-unwind-tables)
+    target_compile_options(wesnoth_n64_lua PRIVATE
+        -Oz -flto=auto -ffat-lto-objects
+        -fno-asynchronous-unwind-tables -fno-unwind-tables)
+    target_link_options(wesnoth_n64 PRIVATE
+        -Oz -flto=auto
+        -fno-asynchronous-unwind-tables -fno-unwind-tables)
 
     # Link libdragon + zlib (for save compression)
     target_link_libraries(wesnoth_n64 PRIVATE
+        wesnoth_n64_lua
         ${N64_INST}/mips64-elf/lib/libdragon.a
         ${N64_INST}/mips64-elf/lib/libdragonsys.a
-        z    # zlib (for savegame compression)
-        m c
+        # zlib stubbed inline for N64 (no compression, just memcpy)
+        m c gcc
     )
 
     n64_create_rom(wesnoth_n64)
 
     # Asset pipeline tool (host-side, always built with the host compiler)
-    add_subdirectory(tools/n64-asset-pipeline)
+    # add_subdirectory(tools/n64-asset-pipeline)
 
     # Stop processing the rest of this file (it's PC-specific)
     return()

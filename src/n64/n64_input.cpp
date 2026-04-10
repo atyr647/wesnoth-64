@@ -11,7 +11,7 @@
 #  include <joypad.h>
 #endif
 
-#include "../../src/hotkey/hotkey_command.hpp"
+#include "../hotkey/hotkey_command.hpp"
 
 // -----------------------------------------------------------------------
 // Configuration
@@ -32,34 +32,54 @@ static PortState s_ports[4];
 static u8        s_active_port = 0;
 
 // -----------------------------------------------------------------------
+// Button bitmask constants (matching joypad_buttons_t.raw bit positions)
+// -----------------------------------------------------------------------
+#ifdef N64_BUILD
+static constexpr u16 BTN_A     = (1 << 0);
+static constexpr u16 BTN_B     = (1 << 1);
+static constexpr u16 BTN_Z     = (1 << 2);
+static constexpr u16 BTN_START = (1 << 3);
+static constexpr u16 BTN_DU    = (1 << 4);
+static constexpr u16 BTN_DD    = (1 << 5);
+static constexpr u16 BTN_DL    = (1 << 6);
+static constexpr u16 BTN_DR    = (1 << 7);
+static constexpr u16 BTN_L     = (1 << 10);
+static constexpr u16 BTN_R     = (1 << 11);
+static constexpr u16 BTN_CU    = (1 << 12);
+static constexpr u16 BTN_CD    = (1 << 13);
+static constexpr u16 BTN_CL    = (1 << 14);
+static constexpr u16 BTN_CR    = (1 << 15);
+#endif
+
+// -----------------------------------------------------------------------
 // Button → Action mapping table
 // -----------------------------------------------------------------------
 struct ButtonMap {
-    u32       libdragon_btn; // JOYPAD_BTN_* mask
-    bool      needs_z;       // requires Z held as modifier
+    u16       btn_mask;    // bitmask for joypad_buttons_t.raw
+    bool      needs_z;     // requires Z held as modifier
     N64Action action;
 };
 
 #ifdef N64_BUILD
 static const ButtonMap k_button_map[] = {
-    { JOYPAD_BTN_A,     false, N64_ACTION_SELECT         },
-    { JOYPAD_BTN_B,     false, N64_ACTION_CANCEL         },
-    { JOYPAD_BTN_R,     false, N64_ACTION_CONTEXT_MENU   },
-    { JOYPAD_BTN_L,     false, N64_ACTION_CYCLE_UNITS_BWD},
-    { JOYPAD_BTN_CU,    false, N64_ACTION_SCROLL_UP      },
-    { JOYPAD_BTN_CD,    false, N64_ACTION_SCROLL_DOWN    },
-    { JOYPAD_BTN_CL,    false, N64_ACTION_SCROLL_LEFT    },
-    { JOYPAD_BTN_CR,    false, N64_ACTION_CYCLE_UNITS_FWD},
-    { JOYPAD_BTN_DU,    false, N64_ACTION_QUICKSAVE      },
-    { JOYPAD_BTN_DD,    false, N64_ACTION_END_TURN       },
-    { JOYPAD_BTN_DL,    false, N64_ACTION_UNDO           },
-    { JOYPAD_BTN_DR,    false, N64_ACTION_UNIT_INFO      },
-    { JOYPAD_BTN_START, false, N64_ACTION_GAME_MENU      },
+    { BTN_A,     false, N64_ACTION_SELECT         },
+    { BTN_B,     false, N64_ACTION_CANCEL         },
+    { BTN_R,     false, N64_ACTION_CONTEXT_MENU   },
+    { BTN_L,     false, N64_ACTION_CYCLE_UNITS_BWD},
+    { BTN_CU,    false, N64_ACTION_SCROLL_UP      },
+    { BTN_CD,    false, N64_ACTION_SCROLL_DOWN    },
+    { BTN_CL,    false, N64_ACTION_SCROLL_LEFT    },
+    { BTN_CR,    false, N64_ACTION_CYCLE_UNITS_FWD},
+    { BTN_DU,    false, N64_ACTION_QUICKSAVE      },
+    { BTN_DD,    false, N64_ACTION_END_TURN       },
+    { BTN_DL,    false, N64_ACTION_UNDO           },
+    { BTN_DR,    false, N64_ACTION_UNIT_INFO      },
+    { BTN_START, false, N64_ACTION_GAME_MENU      },
     // Z-modified
-    { JOYPAD_BTN_A,     true,  N64_ACTION_ATTACK         },
-    { JOYPAD_BTN_B,     true,  N64_ACTION_RECALL         },
-    { JOYPAD_BTN_R,     true,  N64_ACTION_RECRUIT        },
-    { JOYPAD_BTN_START, true,  N64_ACTION_SURRENDER      },
+    { BTN_A,     true,  N64_ACTION_ATTACK         },
+    { BTN_B,     true,  N64_ACTION_RECALL         },
+    { BTN_R,     true,  N64_ACTION_RECRUIT        },
+    { BTN_START, true,  N64_ACTION_SURRENDER      },
 };
 #endif
 
@@ -95,22 +115,22 @@ void n64_input_poll() {
         st.cursor_dy = 0;
 
 #ifdef N64_BUILD
-        if (!joypad_is_connected(p)) continue;
+        if (!joypad_is_connected((joypad_port_t)p)) continue;
 
-        joypad_buttons_t pressed  = joypad_get_buttons_pressed(p);
-        joypad_buttons_t released = joypad_get_buttons_released(p);
-        joypad_buttons_t held_raw = joypad_get_buttons_held(p);
-        joypad_inputs_t  inputs   = joypad_get_inputs(p);
+        joypad_buttons_t pressed  = joypad_get_buttons_pressed((joypad_port_t)p);
+        joypad_buttons_t released = joypad_get_buttons_released((joypad_port_t)p);
+        joypad_buttons_t held_raw = joypad_get_buttons_held((joypad_port_t)p);
+        joypad_inputs_t  inputs   = joypad_get_inputs((joypad_port_t)p);
 
         st.stick_x = inputs.stick_x;
         st.stick_y = inputs.stick_y;
 
-        bool z_held = (held_raw.z != 0);
+        bool z_held = held_raw.z;
 
         for (const auto& bm : k_button_map) {
             if (bm.needs_z != z_held) continue;
-            bool is_pressed = (pressed.raw  & bm.libdragon_btn) != 0;
-            bool is_held    = (held_raw.raw & bm.libdragon_btn) != 0;
+            bool is_pressed = (pressed.raw  & bm.btn_mask) != 0;
+            bool is_held    = (held_raw.raw & bm.btn_mask) != 0;
             N64Action act   = bm.action;
 
             if (is_pressed) {
@@ -119,7 +139,7 @@ void n64_input_poll() {
                 ps.held_frames[act]  = 0;
             } else if (is_held) {
                 ps.held_frames[act]++;
-            } else if ((released.raw & bm.libdragon_btn) != 0) {
+            } else if ((released.raw & bm.btn_mask) != 0) {
                 st.held[act]        = false;
                 ps.held_frames[act] = 0;
             }
@@ -176,7 +196,7 @@ void n64_input_set_active_port(u8 port) {
 
 bool n64_input_connected(u8 port) {
 #ifdef N64_BUILD
-    return joypad_is_connected(port);
+    return joypad_is_connected((joypad_port_t)port);
 #else
     return port == 0;
 #endif
@@ -200,13 +220,13 @@ int n64_action_to_hotkey(N64Action action) {
     case N64_ACTION_CANCEL:          return HOTKEY_DESELECT_HEX;
     case N64_ACTION_END_TURN:        return HOTKEY_ENDTURN;
     case N64_ACTION_UNDO:            return HOTKEY_UNDO;
-    case N64_ACTION_CYCLE_UNITS_FWD: return HOTKEY_UNIT_LIST;
+    case N64_ACTION_CYCLE_UNITS_FWD: return HOTKEY_CYCLE_UNITS;
     case N64_ACTION_RECRUIT:         return HOTKEY_RECRUIT;
     case N64_ACTION_RECALL:          return HOTKEY_RECALL;
-    case N64_ACTION_ATTACK:          return HOTKEY_ATTACK;
+    case N64_ACTION_ATTACK:          return HOTKEY_SELECT_AND_ACTION;
     case N64_ACTION_QUICKSAVE:       return HOTKEY_SAVE_GAME;
-    case N64_ACTION_GAME_MENU:       return HOTKEY_MENU;
-    case N64_ACTION_UNIT_INFO:       return HOTKEY_SPEAK_UNIT;
+    case N64_ACTION_GAME_MENU:       return HOTKEY_QUIT_GAME;
+    case N64_ACTION_UNIT_INFO:       return HOTKEY_UNIT_DESCRIPTION;
     default:                         return HOTKEY_NULL;
     }
 }

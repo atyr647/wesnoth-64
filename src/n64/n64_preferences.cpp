@@ -20,13 +20,14 @@
 #include "../preferences/preferences.hpp"
 #include "../game_config.hpp"
 #include "../terrain/translation.hpp"
+#include "../sdl/point.hpp"
 
 #include <string>
 #include <vector>
 #include <set>
 #include <chrono>
 
-namespace preferences {
+// prefs class is at global scope (not inside namespace preferences)
 
 // -----------------------------------------------------------------------
 // Constructor / Destructor
@@ -344,7 +345,5 @@ bool prefs::sub_achievement(const std::string&, const std::string&, const std::s
 void prefs::set_sub_achievement(const std::string&, const std::string&, const std::string&) {}
 
 void prefs::clear_mp_alert_prefs() {}
-
-} // namespace preferences
 
 #endif // N64_BUILD

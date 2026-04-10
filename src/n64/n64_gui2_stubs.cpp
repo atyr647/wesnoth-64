@@ -45,25 +45,25 @@ void show_message(const std::string& title,
                   const bool,
                   const bool,
                   const bool) {
-    n64_message_box(title.c_str(), message.c_str(), N64_MB_OK);
+    n64_message_box(title, message, N64MsgButtons::OK);
 }
 
 int show_message(const std::string& title,
                  const std::string& message,
                  const dialogs::message::button_style style,
                  bool, bool) {
-    N64MBType mb = N64_MB_OK;
+    N64MsgButtons mb = N64MsgButtons::OK;
     if (style == dialogs::message::yes_no_buttons)
-        mb = N64_MB_YESNO;
+        mb = N64MsgButtons::YES_NO;
     else if (style == dialogs::message::ok_cancel_buttons)
-        mb = N64_MB_OKCANCEL;
+        mb = N64MsgButtons::OK_CANCEL;
 
-    int result = n64_message_box(title.c_str(), message.c_str(), mb);
+    int result = n64_message_box(title, message, mb);
     return result == 0 ? gui2::retval::OK : gui2::retval::CANCEL;
 }
 
 void show_error_message(const std::string& message, bool) {
-    n64_message_box("Error", message.c_str(), N64_MB_OK);
+    n64_message_box("Error", message, N64MsgButtons::OK);
 }
 
 void show_transient_message(const std::string& title,
@@ -71,12 +71,12 @@ void show_transient_message(const std::string& title,
                              const std::string&,
                              const bool,
                              const bool) {
-    n64_message_box(title.empty() ? "Info" : title.c_str(),
-                    message.c_str(), N64_MB_OK);
+    n64_message_box(title.empty() ? "Info" : title,
+                    message, N64MsgButtons::OK);
 }
 
 void show_transient_error_message(const std::string& message, bool) {
-    n64_message_box("Error", message.c_str(), N64_MB_OK);
+    n64_message_box("Error", message, N64MsgButtons::OK);
 }
 
 // =====================================================================
@@ -94,15 +94,13 @@ namespace dialogs {
 // =====================================================================
 loading_screen* loading_screen::singleton_ = nullptr;
 
-void loading_screen::display(std::function<void()> f) {
+void loading_screen::display(const std::function<void()>& f) {
     n64_loading_screen_show("Loading...");
     if (f) f();
     n64_loading_screen_hide();
 }
 
-bool loading_screen::displaying() {
-    return singleton_ != nullptr;
-}
+// displaying() is inline in the header — don't redefine
 
 void loading_screen::progress(loading_stage stage) {
     const char* names[] = {

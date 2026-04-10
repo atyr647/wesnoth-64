@@ -34,6 +34,7 @@
 #include "../playsingle_controller.hpp"
 #include "../game_initialization/playcampaign.hpp"
 #include "../serialization/parser.hpp"
+#include "../serialization/binary_or_text.hpp"
 #include "../log.hpp"
 
 static lg::log_domain log_n64("n64");
@@ -52,7 +53,7 @@ static std::vector<N64CampaignEntry> enumerate_campaigns();
 // -----------------------------------------------------------------------
 game_launcher::game_launcher(const commandline_options& cmdline_opts)
     : cmdline_opts_(cmdline_opts)
-    , config_manager_()
+    , config_manager_(cmdline_opts)
     , font_manager_()
     , image_manager_()
     , main_event_context_()
@@ -112,11 +113,6 @@ bool game_launcher::play_multiplayer(mp_mode) {
 
 bool game_launcher::play_multiplayer_commandline() { return false; }
 
-bool game_launcher::play_campaign() {
-    // Delegate to play_game() campaign path
-    return true;
-}
-
 bool game_launcher::change_language() { return false; }
 
 void game_launcher::launch_game(reload_mode) {
@@ -159,7 +155,7 @@ savegame::load_game_metadata game_launcher::extract_load_data() {
 // This is called repeatedly by n64_main.cpp.
 // Returns true to keep running, false to exit.
 // -----------------------------------------------------------------------
-bool game_launcher::play_game() {
+bool game_launcher::play_campaign() {
     // Show title screen
     N64TitleAction action = n64_title_screen();
 
@@ -193,8 +189,7 @@ bool game_launcher::play_game() {
         // Play the campaign
         // The campaign_controller manages the scenario sequence
         try {
-            campaign_controller cc(state, game_config_manager::get()->game_config(),
-                                    game_config_manager::get()->terrain_types());
+            campaign_controller cc(state);
             cc.play_game();
         } catch (const std::exception& e) {
             N64_LOG("Campaign exception: %s", e.what());
@@ -214,8 +209,7 @@ bool game_launcher::play_game() {
         n64_loading_screen_hide();
 
         try {
-            campaign_controller cc(state, game_config_manager::get()->game_config(),
-                                    game_config_manager::get()->terrain_types());
+            campaign_controller cc(state);
             cc.play_game();
         } catch (const std::exception& e) {
             n64_message_box("Error", std::string("Error: ") + e.what());
@@ -253,16 +247,14 @@ bool game_launcher::play_game() {
 
         // Parse WML and restore game state
         saved_game state;
-        config cfg;
         std::istringstream is(wml_data);
-        read(cfg, is);
-        state.set_data(cfg);
+        config cfg = io::read(is);
+        state.set_data(std::move(cfg));
 
         n64_loading_screen_hide();
 
         try {
-            campaign_controller cc(state, game_config_manager::get()->game_config(),
-                                    game_config_manager::get()->terrain_types());
+            campaign_controller cc(state);
             cc.play_game();
         } catch (const std::exception& e) {
             n64_message_box("Error", std::string("Error: ") + e.what());
@@ -357,7 +349,7 @@ static bool load_campaign_from_rom(const std::string& campaign_id,
     // Set difficulty
     cfg["difficulty"] = std::to_string(difficulty);
 
-    state.set_data(cfg);
+    state.set_data(std::move(cfg));
     return true;
 }
 
@@ -400,9 +392,7 @@ bool n64_do_save(const saved_game& gamestate, const std::string& label,
 
     // Serialise game state to WML text
     std::ostringstream os;
-    config cfg;
-    gamestate.write_config(cfg);
-    ::write(os, cfg);
+    { config_writer writer(os, false); gamestate.write_config(writer); }
     std::string wml_data = os.str();
 
     bool ok = n64_save_write(slot, wml_data, label.c_str(),

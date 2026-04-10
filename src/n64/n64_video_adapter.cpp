@@ -14,6 +14,8 @@
 #ifdef N64_BUILD
 
 #include "../video.hpp"
+#include "../sdl/surface.hpp"
+#include "../sdl/texture.hpp"
 #include "n64_video.hpp"
 #include "n64_platform.hpp"
 
@@ -95,7 +97,7 @@ surface read_pixels_low_res(const rect*) { return surface(); }
 // -----------------------------------------------------------------------
 // Render targets
 // -----------------------------------------------------------------------
-texture force_render_target(const texture&) { return texture(); }
+void force_render_target(const texture&) {}
 void clear_render_target()  {}
 void reset_render_target()  {}
 texture get_render_target()  { return texture(); }

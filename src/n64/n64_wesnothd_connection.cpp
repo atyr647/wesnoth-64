@@ -1,128 +1,85 @@
 /**
  * n64_wesnothd_connection.cpp
  *
- * N64 replacement for src/wesnothd_connection.cpp.
- *
- * On PC, wesnothd_connection manages a TCP socket to the Wesnoth server
- * using boost::asio with background threads. On N64, multiplayer goes
- * through N64-NetLib (USB → PC relay app → Java game server).
- *
- * This provides the wesnothd_connection class interface but routes all
- * traffic through netlib_adapter.hpp's packet system.
+ * N64 stub for src/wesnothd_connection.cpp.
+ * All networking is disabled — multiplayer goes through N64-NetLib if available.
+ * This provides the wesnothd_connection class method implementations as no-ops.
  */
 
 #ifdef N64_BUILD
 
 #include "../wesnothd_connection.hpp"
-#include "netlib_adapter.hpp"
 #include "n64_platform.hpp"
 
-// -----------------------------------------------------------------------
-// wesnothd_connection implementation for N64
-// -----------------------------------------------------------------------
-
+// Constructor — initialize all members to safe defaults
 wesnothd_connection::wesnothd_connection(const std::string& host, const std::string& service)
-    : host_(host)
+    : worker_thread_()
+    , io_context_()
+    , resolver_(io_context_)
+    , tls_context_(boost::asio::ssl::context::tlsv12_client)
+    , host_(host)
     , service_(service)
+    , use_tls_(false)
+    , socket_(raw_socket{})
+    , last_error_()
+    , handshake_finished_()
+    , read_buf_()
+    , handshake_response_(0)
+    , payload_size_(0)
+    , bytes_to_write_(0)
+    , bytes_written_(0)
+    , bytes_to_read_(0)
+    , bytes_read_(0)
 {
-    N64_LOG("wesnothd_connection: connecting via N64-NetLib to %s:%s",
-            host.c_str(), service.c_str());
-    n64_netlib_connect();
+    N64_LOG("wesnothd_connection: stub (no network on N64) host=%s", host.c_str());
 }
 
 wesnothd_connection::~wesnothd_connection() {
-    n64_netlib_disconnect();
 }
 
-bool wesnothd_connection::receive_data(config& result) {
-    // Check the NetLib receive ring buffer for incoming WML data
-    N64NetlibEvent ev;
-    if (n64_netlib_poll_event(ev)) {
-        // Convert binary packet back to WML config
-        // The server sends pre-formatted binary WML
-        if (ev.type != 0 && ev.data_len > 0) {
-            try {
-                // Parse the packet payload as simplified WML
-                std::string payload(reinterpret_cast<const char*>(ev.data), ev.data_len);
-                read(result, payload);
-                return true;
-            } catch (...) {
-                N64_LOG("wesnothd_connection: failed to parse incoming packet type %d", ev.type);
-            }
-        }
-    }
+void wesnothd_connection::send_data(const configr_of& /*request*/) {
+    // No-op on N64
+}
+
+bool wesnothd_connection::receive_data(config& /*result*/) {
     return false;
 }
 
-void wesnothd_connection::send_data(const config& request, const std::string& /*packet_type*/) {
-    // Serialize config to binary and send via NetLib
-    std::string data;
-    write(data, request);
-
-    if (data.size() <= N64_NETLIB_MAX_PAYLOAD) {
-        n64_netlib_send_raw(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-    } else {
-        // Fragment large payloads
-        size_t offset = 0;
-        while (offset < data.size()) {
-            size_t chunk = std::min(data.size() - offset, (size_t)N64_NETLIB_MAX_PAYLOAD);
-            n64_netlib_send_raw(reinterpret_cast<const uint8_t*>(data.data() + offset), chunk);
-            offset += chunk;
-        }
-    }
+bool wesnothd_connection::wait_and_receive_data(config& /*data*/) {
+    return false;
 }
 
-bool wesnothd_connection::has_data_received() const {
-    return n64_netlib_has_data();
-}
-
-bool wesnothd_connection::is_sending_data() const {
-    return false; // Sends are synchronous on N64
-}
-
-std::size_t wesnothd_connection::bytes_to_write() const {
-    return 0;
+void wesnothd_connection::wait_for_handshake() {
+    // No-op
 }
 
 void wesnothd_connection::cancel() {
-    n64_netlib_disconnect();
 }
 
 void wesnothd_connection::stop() {
-    n64_netlib_disconnect();
 }
 
-bool wesnothd_connection::running() const {
-    return n64_netlib_is_connected();
+// Private methods — all stubs
+void wesnothd_connection::handle_resolve(const boost::system::error_code&, const results_type&) {}
+void wesnothd_connection::handle_connect(const boost::system::error_code&, endpoint) {}
+void wesnothd_connection::handshake() {}
+void wesnothd_connection::handle_handshake(const boost::system::error_code&) {}
+void wesnothd_connection::fallback_to_unencrypted() {}
+
+std::size_t wesnothd_connection::is_write_complete(const boost::system::error_code&, std::size_t) {
+    return 0;
 }
 
-// Handshake — N64-NetLib handles this at the transport layer
-bool wesnothd_connection::handshake_finished() const {
-    return n64_netlib_is_connected();
+void wesnothd_connection::handle_write(const boost::system::error_code&, std::size_t) {}
+
+std::size_t wesnothd_connection::is_read_complete(const boost::system::error_code&, std::size_t) {
+    return 0;
 }
 
-// Wait for data (blocking on N64 — poll with timeout)
-bool wesnothd_connection::wait_for_data(std::chrono::milliseconds timeout) {
-    auto start = std::chrono::steady_clock::now();
-    while (!has_data_received()) {
-        n64_netlib_poll();
-        auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed >= timeout) return false;
-    }
-    return true;
-}
+void wesnothd_connection::handle_read(const boost::system::error_code&, std::size_t) {}
 
-// Helper: simple WML serialization for network
-void wesnothd_connection::write(std::string& out, const config& cfg) {
-    // Minimal WML text serialization
-    std::ostringstream ss;
-    ::write(ss, cfg);
-    out = ss.str();
-}
-
-void wesnothd_connection::read(config& cfg, const std::string& data) {
-    std::istringstream ss(data);
-    ::read(cfg, ss);
-}
+void wesnothd_connection::send() {}
+void wesnothd_connection::recv() {}
+void wesnothd_connection::set_keepalive(int) {}
 
 #endif // N64_BUILD

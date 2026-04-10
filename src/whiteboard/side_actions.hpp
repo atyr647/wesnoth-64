@@ -230,7 +230,7 @@ public:
 	iterator turn_begin(std::size_t turn_num);
 	const_iterator turn_begin(std::size_t turn_num) const;
 	reverse_iterator turn_rbegin(std::size_t turn_num){ return reverse_iterator(turn_end(turn_num)); }
-	const_reverse_iterator turn_rbegin(std::size_t turn_num) const { return reverse_iterator(turn_end(turn_num)); }
+	const_reverse_iterator turn_rbegin(std::size_t turn_num) const { return const_reverse_iterator(turn_end(turn_num)); }
 
 	/*
 	 * Returns the iterator for the position *after* the last executed action of a given turn within the actions queue.
@@ -238,7 +238,7 @@ public:
 	iterator turn_end(std::size_t turn_num){ return turn_begin(turn_num+1); }
 	const_iterator turn_end(std::size_t turn_num) const { return turn_begin(turn_num+1); }
 	reverse_iterator turn_rend(std::size_t turn_num){ return reverse_iterator(turn_begin(turn_num)); }
-	const_reverse_iterator turn_rend(std::size_t turn_num) const { return reverse_iterator(turn_begin(turn_num)); }
+	const_reverse_iterator turn_rend(std::size_t turn_num) const { return const_reverse_iterator(turn_begin(turn_num)); }
 
 	/**
 	 * Returns an iterator range corresponding to the requested turn.
@@ -256,6 +256,8 @@ public:
 
 	template<typename Modifier>
 	bool modify(iterator position, Modifier mod) { return actions_.modify(position, mod); }
+	template<typename Modifier>
+	bool modify(const_iterator position, Modifier mod) { return actions_.modify(position, mod); }
 private:
 	/**
 	 * Binary search to find the occurring turn of the action pointed by an iterator.
@@ -479,7 +481,7 @@ public:
 	iterator find_last_action_of(std::size_t unit_id, iterator start_position);
 	/** const variant of the previous function */
 	const_iterator find_last_action_of(const unit& unit, const_iterator start_position) const;
-	const_iterator find_last_action_of(std::size_t unit_id, iterator start_position) const;
+	const_iterator find_last_action_of(std::size_t unit_id, const_iterator start_position) const;
 	/** Variant of the previous method that always start searching at the end of the queue */
 	iterator find_last_action_of(const unit& unit);
 	iterator find_last_action_of(std::size_t unit_id);

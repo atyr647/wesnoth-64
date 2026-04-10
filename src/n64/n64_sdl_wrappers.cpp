@@ -18,12 +18,17 @@
 
 #include "n64_video.hpp"
 #include "n64_platform.hpp"
+#include "n64_romfs.hpp"
 
+#include "../sdl/rect.hpp"
+#include "../color.hpp"
+#include "../sdl/surface.hpp"
 #include "../map/location.hpp"
 
 #include <array>
 #include <ostream>
 #include <functional>
+#include <vector>
 
 // -----------------------------------------------------------------------
 // src/draw.cpp replacement — Wesnoth's draw namespace
@@ -35,24 +40,24 @@
 
 namespace draw {
 
-void blit(const texture& tex, const rect& dst) {
+void blit(const texture& tex, const ::rect& dst) {
     // Route through SDL_RenderCopy shim
     SDL_Rect d = {dst.x, dst.y, dst.w, dst.h};
     SDL_RenderCopy(nullptr, nullptr, nullptr, &d);
 }
 
-void blit(const texture& tex, const rect& src, const rect& dst) {
+void blit(const texture& tex, const ::rect& src, const ::rect& dst) {
     // Handled by SDL shim
     SDL_Rect d = {dst.x, dst.y, dst.w, dst.h};
     SDL_RenderCopy(nullptr, nullptr, nullptr, &d);
 }
 
-void fill(const rect& area, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+void fill(const ::rect& area, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     n64_draw_rect(LAYER_UI, {(s16)area.x, (s16)area.y, (s16)area.w, (s16)area.h},
                   N64Color::from_rgba(r, g, b, a));
 }
 
-void fill(const rect& area, const color_t& c) {
+void fill(const ::rect& area, const color_t& c) {
     fill(area, c.r, c.g, c.b, c.a);
 }
 
@@ -89,7 +94,7 @@ void present() {
 void set_color(uint8_t, uint8_t, uint8_t, uint8_t) {}
 void set_blend_mode(SDL_BlendMode) {}
 
-::rect get_clip() { return {0, 0, N64_SCREEN_W, N64_SCREEN_H}; }
+::rect get_clip() { return ::rect(0, 0, N64_SCREEN_W, N64_SCREEN_H); }
 void set_clip(const ::rect&) {}
 void unset_clip() {}
 
@@ -101,12 +106,12 @@ void clear_render_target() {}
 
 // RAII render target setter
 render_target_setter::render_target_setter(const texture&)
-    : target_(), viewport_({0,0,N64_SCREEN_W,N64_SCREEN_H}), clip_({0,0,N64_SCREEN_W,N64_SCREEN_H}) {}
+    : target_(), viewport_(::rect(0,0,N64_SCREEN_W,N64_SCREEN_H)), clip_(::rect(0,0,N64_SCREEN_W,N64_SCREEN_H)) {}
 render_target_setter::~render_target_setter() {}
 
 // RAII clip setter
 clip_setter::clip_setter(const ::rect&)
-    : c_({0,0,N64_SCREEN_W,N64_SCREEN_H}), clip_enabled_(false) {}
+    : c_(::rect(0,0,N64_SCREEN_W,N64_SCREEN_H)), clip_enabled_(false) {}
 clip_setter::~clip_setter() {}
 
 // Factory functions returning RAII objects
@@ -240,7 +245,7 @@ void set_color_adjustment(int, int, int) {}
 // -----------------------------------------------------------------------
 namespace image {
 
-texture get_texture(const locator& loc, TYPE) {
+texture get_texture(const locator& loc, TYPE, bool) {
     // Build the ROM path from the image locator
     std::string path = loc.get_filename();
     if (path.empty()) return texture();
@@ -278,15 +283,23 @@ texture get_texture(const locator& loc, TYPE) {
     return texture(); // not found
 }
 
-texture get_lighted_texture(const locator& loc, const light_string&) {
-    return get_texture(loc, UNSCALED);
+texture get_texture(const locator& loc, scale_quality, TYPE type, bool skip_cache) {
+    return get_texture(loc, type, skip_cache);
 }
 
-surface get_surface(const locator&, TYPE) {
+texture get_lighted_texture(const locator& loc, const std::vector<light_adjust>&) {
+    return get_texture(loc, UNSCALED, false);
+}
+
+surface get_lighted_image(const locator&, const std::vector<light_adjust>&) {
+    return surface();
+}
+
+surface get_surface(const locator&, TYPE, bool) {
     return surface(); // Surfaces not used on N64
 }
 
-point get_size(const locator& loc) {
+point get_size(const locator& loc, bool) {
     std::string path = loc.get_filename();
     auto dot = path.rfind('.');
     if (dot != std::string::npos) path = path.substr(0, dot) + ".tex";

@@ -25,6 +25,9 @@ extern "C" {
 #include <zlib.h>
 }
 
+// PI address for SRAM / FlashRAM on the cartridge bus
+#define SRAM_PI_BASE  0x08000000
+
 // -----------------------------------------------------------------------
 // Hardware abstraction
 // -----------------------------------------------------------------------
@@ -39,7 +42,7 @@ static N64SaveSlot s_slots[N64_SAVE_SLOTS];
 // -----------------------------------------------------------------------
 static void save_hw_read(u32 offset, void* dst, u32 len) {
 #ifdef N64_BUILD
-    // libdragon provides sram_read / flashram_read
+    // libdragon accesses SRAM/FlashRAM via PI DMA at 0x08000000
     if (s_has_flash) {
         // Flash reads are 128-byte aligned
         u8 buf[128] __attribute__((aligned(16)));
@@ -47,14 +50,14 @@ static void save_hw_read(u32 offset, void* dst, u32 len) {
         while (pos < len) {
             u32 chunk = (len - pos > 128) ? 128 : (len - pos);
             u32 aligned_off = (offset + pos) & ~127u;
-            flashram_read(buf, aligned_off, 128);
+            dma_read(buf, SRAM_PI_BASE + aligned_off, 128);
             u32 skip = (offset + pos) - aligned_off;
             u32 copy = (chunk > 128 - skip) ? 128 - skip : chunk;
             std::memcpy((u8*)dst + pos, buf + skip, copy);
             pos += copy;
         }
     } else {
-        sram_read(dst, offset, len);
+        dma_read(dst, SRAM_PI_BASE + offset, len);
     }
 #endif
 }
@@ -63,10 +66,10 @@ static void save_hw_write(u32 offset, const void* src, u32 len) {
 #ifdef N64_BUILD
     if (s_has_flash) {
         // Flash writes require sector erase + write
-        // libdragon handles this internally
-        flashram_write(src, offset, len);
+        // PI DMA write to FlashRAM address space
+        dma_write(src, SRAM_PI_BASE + offset, len);
     } else {
-        sram_write(src, offset, len);
+        dma_write(src, SRAM_PI_BASE + offset, len);
     }
 #endif
 }

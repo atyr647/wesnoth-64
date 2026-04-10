@@ -40,17 +40,43 @@ sdl_handler::~sdl_handler() {
 void sdl_handler::join() {
     if (std::find(s_handlers.begin(), s_handlers.end(), this) == s_handlers.end())
         s_handlers.push_back(this);
+    has_joined_ = true;
+}
+
+void sdl_handler::join(context&) {
+    join();
 }
 
 void sdl_handler::join_same(sdl_handler*) {
     join();
 }
 
+void sdl_handler::join_global() {
+    has_joined_global_ = true;
+}
+
+void sdl_handler::leave_global() {
+    has_joined_global_ = false;
+}
+
 void sdl_handler::leave() {
     s_handlers.erase(
         std::remove(s_handlers.begin(), s_handlers.end(), this),
         s_handlers.end());
+    has_joined_ = false;
 }
+
+// -----------------------------------------------------------------------
+// pump_monitor
+// -----------------------------------------------------------------------
+pump_monitor::pump_monitor() {}
+pump_monitor::~pump_monitor() {}
+
+// -----------------------------------------------------------------------
+// is_touch helpers — N64 has no touch input
+// -----------------------------------------------------------------------
+bool is_touch(const SDL_MouseButtonEvent&) { return false; }
+bool is_touch(const SDL_MouseMotionEvent&) { return false; }
 
 // -----------------------------------------------------------------------
 // Event pump — called every frame by the game loop
@@ -92,11 +118,6 @@ void pump() {
     }
 }
 
-void pump_and_draw() {
-    pump();
-    // draw_manager::sparkle() is called by the game loop
-}
-
 void raise_process_event() {
     for (auto* h : s_handlers) {
         h->process_event();
@@ -104,16 +125,12 @@ void raise_process_event() {
 }
 
 void raise_draw_event() {
-    for (auto* h : s_handlers) {
-        h->draw();
-    }
 }
 
 // -----------------------------------------------------------------------
 // Focus/visibility (always focused on N64)
 // -----------------------------------------------------------------------
 bool has_focus() { return true; }
-int pump_info::ticks() { return (int)SDL_GetTicks(); }
 
 // -----------------------------------------------------------------------
 // Context management
@@ -131,9 +148,12 @@ void discard_input() {
 // -----------------------------------------------------------------------
 // Call frequency limiter
 // -----------------------------------------------------------------------
-call_in_main_thread::call_in_main_thread(std::function<void()> f) {
+void call_in_main_thread(const std::function<void()>& f) {
     if (f) f(); // Execute immediately on N64 (single-threaded)
 }
+
+void draw() {}
+
 
 } // namespace events
 

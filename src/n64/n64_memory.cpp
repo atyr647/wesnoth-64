@@ -32,6 +32,3 @@ void n64_memory_init() {
             (unsigned)(sizeof(s_game_buf) / 1024),
             (unsigned)(sizeof(s_wml_buf)  / 1024));
 }
-
-// Exposed declaration so n64_main.cpp can call it
-extern "C" void n64_memory_init();

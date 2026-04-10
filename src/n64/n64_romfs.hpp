@@ -37,6 +37,8 @@ struct RomFsEntry {
     u32  rom_offset;    // absolute ROM cartridge address (PI_DOM1_ADDR2 + offset)
     u32  byte_length;   // size of the asset in bytes
     u8   type;          // RomFsType
+    u16  width;         // pixel width (for textures/sprites)
+    u16  height;        // pixel height (for textures/sprites)
 };
 
 enum RomFsType : u8 {

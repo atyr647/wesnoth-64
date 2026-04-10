@@ -32,6 +32,8 @@
 #  include "game_config.hpp"
 #  include "game_config_manager.hpp"
 #  include "game_launcher.hpp"
+#  include "game_classification.hpp"
+#  include "commandline_options.hpp"
 #  include "log.hpp"
 #  include "preferences/preferences.hpp"
 #  include "serialization/schema_validator.hpp"
@@ -40,8 +42,8 @@
 // Expansion Pak check — Wesnoth N64 requires 8 MB
 // -----------------------------------------------------------------------
 static void check_expansion_pak() {
-    // osGetMemSize() returns either 0x400000 (4 MB) or 0x800000 (8 MB)
-    u32 mem_size = osGetMemSize();
+    // get_memory_size() returns either 0x400000 (4 MB) or 0x800000 (8 MB)
+    int mem_size = get_memory_size();
     if (mem_size < 0x800000) {
         // Draw an error screen and halt
         display_init(RESOLUTION_320x240, DEPTH_16_BPP, 1, GAMMA_NONE, ANTIALIAS_OFF);
@@ -94,22 +96,26 @@ int main() {
     // Load game data from ROM filesystem
     // The game_config_manager is initialised with a custom N64 filesystem
     // backend (src/n64/n64_filesystem_backend.cpp) instead of boost::filesystem
-    game_config_manager::get()->load_game_config_for_game();
+    game_classification classification;
+    game_config_manager::get()->load_game_config_for_game(classification, "");
 
     // --- Phase 7: Title screen and main menu loop ---
     // game_launcher handles the entire title → campaign select → gameplay
     // loop. On N64 it is configured to skip the add-on manager, map editor,
     // and multiplayer server browser (unless USB NetLib is detected).
-    game_launcher launcher;
+    // N64 uses an empty argument list for commandline_options
+    const std::vector<std::string> n64_args = {"wesnoth"};
+    commandline_options cmdline_opts(n64_args);
+    game_launcher launcher(cmdline_opts);
 
     // Check for NetLib connection (optional — only for online MP)
     bool has_network = n64_netlib_init();
     N64_LOG("NetLib: %s", has_network ? "connected" : "not connected (single-player only)");
 
     // Main game loop
-    while (launcher.play_game()) {
+    while (launcher.play_campaign()) {
         // n64_audio_update() keeps the music streaming each frame
-        // The game loop inside play_game() calls n64_input_poll() and
+        // The game loop inside play_campaign() calls n64_input_poll() and
         // n64_video_flip() via the SDL shim.
     }
 

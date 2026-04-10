@@ -508,9 +508,9 @@ void text_box_base::handle_editing(bool& handled, const std::string& unicode, in
 		int maximum_length = text_.get_length();
 
 		// Update status
-		set_cursor(std::min(maximum_length, ime_start_point_ + start), false);
+		set_cursor(std::min(maximum_length, static_cast<int>(ime_start_point_ + start)), false);
 		if(len > 0) {
-			set_cursor(std::min(maximum_length, ime_start_point_ + start + len), true);
+			set_cursor(std::min(maximum_length, static_cast<int>(ime_start_point_ + start + len)), true);
 		}
 		update_canvas();
 		queue_redraw();

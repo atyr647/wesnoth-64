@@ -19,6 +19,7 @@
 #ifdef N64_BUILD
 
 #include "../draw_manager.hpp"
+#include "../gui/core/top_level_drawable.hpp"
 #include "n64_video.hpp"
 #include "n64_audio.hpp"
 #include "n64_input.hpp"
@@ -26,6 +27,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <chrono>
 
 namespace {
 
@@ -77,8 +79,8 @@ void request_extra_render_pass() {
     s_extra_pass = true;
 }
 
-int get_frame_length() {
-    return (int)s_frame_length;
+std::chrono::milliseconds get_frame_length() {
+    return std::chrono::milliseconds(s_frame_length);
 }
 
 /**

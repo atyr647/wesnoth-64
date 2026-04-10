@@ -119,12 +119,13 @@ public:
 
 class tcp {
 public:
-    using endpoint = struct endpoint_t {
+    struct endpoint_t {
         endpoint_t() = default;
-        endpoint_t(address, unsigned short) {}
-        address address() const { return ip::address(); }
+        endpoint_t(ip::address, unsigned short) {}
+        ip::address address() const { return ip::address(); }
         unsigned short port() const { return 0; }
     };
+    using endpoint = endpoint_t;
 
     using socket = struct socket_t {
         socket_t() = default;
@@ -200,13 +201,143 @@ public:
     void async_wait(H&&) {}
 };
 
+// -----------------------------------------------------------------------
+// boost::asio::ssl stub types
+// -----------------------------------------------------------------------
+namespace ssl {
+
+// Verify mode flags
+enum verify_mode : int {
+    verify_none                 = 0,
+    verify_peer                 = 1,
+    verify_fail_if_no_peer_cert = 2,
+    verify_client_once          = 4
+};
+
+inline verify_mode operator|(verify_mode a, verify_mode b) {
+    return static_cast<verify_mode>(static_cast<int>(a) | static_cast<int>(b));
+}
+
+// Stub verify_context (wraps X509_STORE_CTX* in real Boost)
+class verify_context {
+public:
+    verify_context() = default;
+    void* native_handle() { return nullptr; }
+};
+
+class context {
+public:
+    enum method {
+        sslv23,
+        sslv23_client,
+        sslv23_server,
+        tlsv12,
+        tlsv12_client,
+        tlsv12_server,
+        tlsv13,
+        tlsv13_client,
+        tls,
+        tls_client,
+        tls_server
+    };
+
+    enum file_format { pem, asn1 };
+
+    // Option flags
+    enum options : long {
+        default_workarounds = 0x1,
+        no_sslv2            = 0x2,
+        no_sslv3            = 0x4,
+        single_dh_use       = 0x8
+    };
+
+    explicit context(method) {}
+    context(int) {}
+
+    void set_options(long) {}
+    void set_default_verify_paths() {}
+    void set_verify_mode(int) {}
+    void add_certificate_authority(const const_buffer&) {}
+    void use_certificate_chain_file(const std::string&) {}
+    void use_private_key_file(const std::string&, file_format) {}
+    void use_tmp_dh_file(const std::string&) {}
+};
+
+inline long operator|(context::options a, context::options b) {
+    return static_cast<long>(a) | static_cast<long>(b);
+}
+inline long operator|(long a, context::options b) {
+    return a | static_cast<long>(b);
+}
+
+class stream_base {
+public:
+    enum handshake_type { client, server };
+};
+
+template<typename Stream>
+class stream : public stream_base {
+    Stream next_layer_;
+    context& ctx_;
+public:
+    using next_layer_type = Stream;
+    using lowest_layer_type = Stream;
+
+    stream(Stream s, context& c) : next_layer_(std::move(s)), ctx_(c) {}
+
+    // For io_context-based construction
+    stream(io_context& ioc, context& c) : next_layer_(ioc), ctx_(c) {}
+
+    next_layer_type& next_layer() { return next_layer_; }
+    lowest_layer_type& lowest_layer() { return next_layer_; }
+    const lowest_layer_type& lowest_layer() const { return next_layer_; }
+
+    void set_verify_mode(int) {}
+
+    template<typename VerifyCallback>
+    void set_verify_callback(VerifyCallback&&) {}
+
+    template<typename HandshakeHandler>
+    void async_handshake(handshake_type, HandshakeHandler&&) {}
+
+    void handshake(handshake_type) {}
+    void handshake(handshake_type, error_code&) {}
+
+    template<typename B, typename H>
+    void async_read_some(const B&, H&&) {}
+    template<typename B, typename H>
+    void async_write_some(const B&, H&&) {}
+
+    void shutdown() {}
+    void shutdown(error_code&) {}
+};
+
+// Verification functors
+struct host_name_verification {
+    explicit host_name_verification(const std::string&) {}
+    bool operator()(bool, verify_context&) const { return true; }
+};
+
+// Legacy name
+using rfc2818_verification = host_name_verification;
+
+} // namespace ssl
+
+namespace error {
+    inline const std::error_code operation_aborted = std::make_error_code(std::errc::operation_canceled);
+    inline const std::error_code eof = std::make_error_code(std::errc::broken_pipe);
+} // namespace error
+
 } // namespace asio
 
 // -----------------------------------------------------------------------
 // boost::system::error_code (used alongside asio)
 // -----------------------------------------------------------------------
 namespace system {
+#ifndef N64_BOOST_SYSTEM_ERROR_CODE_DEFINED
+#define N64_BOOST_SYSTEM_ERROR_CODE_DEFINED
     using error_code = std::error_code;
+#endif
     using error_category = std::error_category;
     class system_error : public std::system_error {
     public:

@@ -11,8 +11,10 @@
  */
 
 #ifdef N64_BUILD
+#  define color_t libdragon_color_t
 #  include <libdragon.h>
 #  include <n64sys.h>
+#  undef color_t
 #endif
 
 #include <stdint.h>
@@ -45,14 +47,15 @@ static constexpr int N64_HEX_H     = N64_HEX_SIZE;
 
 // -----------------------------------------------------------------------
 // Memory budget constants
-// With Expansion Pak: 8 MB total RDRAM
+// With Expansion Pak: 8 MB total RDRAM. Pools are kept tight to make
+// room for the (very large) Wesnoth code section.
 // -----------------------------------------------------------------------
 static constexpr size_t N64_RAM_TOTAL        = 8 * 1024 * 1024;
-static constexpr size_t N64_POOL_GAME_STATE  = 1536 * 1024;  // 1.5 MB
-static constexpr size_t N64_POOL_LUA         =  512 * 1024;  //   512 KB
-static constexpr size_t N64_POOL_TEXTURE_CACHE = 1024 * 1024; //   1 MB
-static constexpr size_t N64_POOL_AUDIO       =  512 * 1024;  //   512 KB
-static constexpr size_t N64_POOL_WML_PARSE   = 1024 * 1024;  //   1 MB
+static constexpr size_t N64_POOL_GAME_STATE  =  256 * 1024;  // 256 KB
+static constexpr size_t N64_POOL_LUA         =  128 * 1024;  // 128 KB
+static constexpr size_t N64_POOL_TEXTURE_CACHE = 256 * 1024; // 256 KB
+static constexpr size_t N64_POOL_AUDIO       =  128 * 1024;  // 128 KB
+static constexpr size_t N64_POOL_WML_PARSE   =  256 * 1024;  // 256 KB
 static constexpr size_t N64_POOL_FRAMEBUF    =  307200;      // 320*240*2*2 (double-buffered 16-bit)
 
 // -----------------------------------------------------------------------
@@ -65,6 +68,19 @@ static constexpr size_t N64_POOL_FRAMEBUF    =  307200;      // 320*240*2*2 (dou
 #  include <cstdio>
 #  define N64_LOG(fmt, ...)  std::printf("[wesnoth] " fmt "\n", ##__VA_ARGS__)
 #  define N64_ASSERT(cond)   do { if (!(cond)) { std::fprintf(stderr, "ASSERT FAILED: %s:%d\n", __FILE__, __LINE__); std::abort(); } } while(0)
+#endif
+
+// -----------------------------------------------------------------------
+// POSIX stubs not available on N64
+// -----------------------------------------------------------------------
+#ifdef N64_BUILD
+#include <unistd.h>
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
 #endif
 
 // -----------------------------------------------------------------------

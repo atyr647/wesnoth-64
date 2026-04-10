@@ -151,3 +151,6 @@ inline const char* n64_str(u16 handle) { return g_strings.get(handle); }
 // -----------------------------------------------------------------------
 extern LinearAllocator g_arena_game;   // game state scratch
 extern LinearAllocator g_arena_wml;    // WML parse workspace
+
+// Call once from main() before any game systems
+void n64_memory_init();

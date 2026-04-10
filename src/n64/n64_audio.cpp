@@ -28,7 +28,7 @@
 static constexpr int    AUDIO_FREQ       = 22050; // Hz — lower for RAM savings
 static constexpr int    AUDIO_BUFFERS    = 4;     // number of AI DMA buffers
 static constexpr size_t MAX_SFX_CACHE   = 64;    // max unique SFX in RAM
-static constexpr size_t SFX_DATA_BUDGET = 256 * 1024; // 256 KB for SFX PCM
+static constexpr size_t SFX_DATA_BUDGET = 128 * 1024; // 128 KB for SFX PCM (trimmed to fit 8 MB RAM)
 
 // -----------------------------------------------------------------------
 // SFX cache
@@ -101,7 +101,8 @@ void n64_audio_update() {
 
 #ifdef N64_BUILD
     // Let libdragon mixer fill the audio DMA buffers
-    mixer_poll();
+    static int16_t audio_buf[1024] __attribute__((aligned(16)));
+    mixer_poll(audio_buf, 512);
 
     // Stream next chunk of ADPCM music if needed
     if (s_music.playing) {

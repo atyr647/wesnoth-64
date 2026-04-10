@@ -593,8 +593,8 @@ side_actions::iterator side_actions::find_first_action_of(std::size_t unit_id, i
 	return find_first_action_of(actions_.get<container::by_unit>().equal_range(unit_id), start_position, std::less<iterator>());
 }
 
-side_actions::const_iterator side_actions::find_last_action_of(std::size_t unit_id, iterator start_position) const {
-	return find_first_action_of(actions_.get<container::by_unit>().equal_range(unit_id), start_position, std::greater<iterator>());
+side_actions::const_iterator side_actions::find_last_action_of(std::size_t unit_id, const_iterator start_position) const {
+	return find_first_action_of(actions_.get<container::by_unit>().equal_range(unit_id), start_position, std::greater<const_iterator>());
 }
 
 side_actions::iterator side_actions::find_last_action_of(std::size_t unit_id, side_actions::iterator start_position)
@@ -624,7 +624,7 @@ side_actions::iterator side_actions::find_first_action_of(const unit& unit, side
 }
 
 side_actions::const_iterator side_actions::find_last_action_of(const unit& unit, side_actions::const_iterator start_position) const {
-	return find_first_action_of(actions_.get<container::by_unit>().equal_range(unit.underlying_id()), start_position, std::greater<iterator>());
+	return find_first_action_of(actions_.get<container::by_unit>().equal_range(unit.underlying_id()), start_position, std::greater<const_iterator>());
 }
 
 side_actions::iterator side_actions::find_last_action_of(const unit& unit, side_actions::iterator start_position)

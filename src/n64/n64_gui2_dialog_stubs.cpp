@@ -90,7 +90,12 @@ struct story_viewer {
             }
         }
         if (text.empty()) text = "(No story text)";
-        n64_story_show(scenario_name.c_str(), text.c_str());
+        std::vector<N64StoryPart> parts;
+        N64StoryPart part;
+        part.title = scenario_name;
+        part.text = text;
+        parts.push_back(part);
+        n64_story_show(parts);
     }
 };
 
@@ -100,7 +105,7 @@ struct story_viewer {
 // Called from help/help.cpp
 struct help_browser {
     static void display(const void*, const std::string& show_topic) {
-        n64_message_box("Help", ("Topic: " + show_topic + "\n\nHelp browser not available\non N64.").c_str());
+        n64_message_box("Help", "Topic: " + show_topic + "\n\nHelp browser not available\non N64.");
     }
 };
 
@@ -220,7 +225,7 @@ struct wml_error {
                          const std::string& details, bool) {
         std::string msg = summary;
         if (!post.empty()) msg += "\n" + post;
-        n64_message_box("WML Error", msg.c_str());
+        n64_message_box("WML Error", msg);
     }
 };
 
@@ -271,8 +276,8 @@ namespace gui2 {
 int show_wml_message(const std::string& title, const std::string& message,
                       const void*, const void*,
                       const void*, const void*) {
-    n64_message_box(title.empty() ? "Message" : title.c_str(),
-                    message.c_str(), N64_MB_OK);
+    n64_message_box(title.empty() ? "Message" : title,
+                    message, N64MsgButtons::OK);
     return 0;
 }
 

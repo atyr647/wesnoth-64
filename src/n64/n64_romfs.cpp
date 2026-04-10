@@ -17,13 +17,13 @@
 // -----------------------------------------------------------------------
 // In-RAM directory
 // -----------------------------------------------------------------------
-static constexpr u16 MAX_ENTRIES = 8192; // max assets in one ROM
+static constexpr u16 MAX_ENTRIES = 1024; // max assets in one ROM
 
 static RomFsEntry s_entries[MAX_ENTRIES];
 static u16        s_entry_count = 0;
 
 // Loaded string table (from ROM, interned into g_strings)
-static u8         s_string_buf[64 * 1024] __attribute__((aligned(4)));
+static u8         s_string_buf[16 * 1024] __attribute__((aligned(4)));
 
 // Stub constants — overridden by generated n64_romfs_offsets.cpp
 // from the asset pipeline. These are zero until a real ROM is built.

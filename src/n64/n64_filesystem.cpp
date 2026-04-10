@@ -23,7 +23,9 @@
 
 #include "../filesystem.hpp"
 #include "../config.hpp"
+#include "../utils/optional_fwd.hpp"
 
+#include <chrono>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -37,15 +39,32 @@ std::string get_user_config_dir()    { return ""; }
 std::string get_user_data_dir()      { return ""; }
 std::string get_saves_dir()          { return ""; }
 std::string get_addons_dir()         { return ""; }
-std::string get_wml_location(const std::string& f, const std::string&) {
-    return f; // return as-is; resolved via ROMFS
+std::string get_logs_dir()           { return ""; }
+std::string get_cache_dir()          { return ""; }
+utils::optional<std::string> get_wml_location(const std::string& path, const utils::optional<std::string>&) {
+    return path; // resolved via ROMFS
 }
-std::string get_binary_dir_location(const std::string&, const std::string& f) {
+utils::optional<std::string> get_binary_dir_location(const std::string&, const std::string& f) {
     return f;
 }
-std::string get_binary_file_location(const std::string&, const std::string& f) {
+utils::optional<std::string> get_binary_file_location(const std::string&, const std::string& f) {
     return f;
 }
+utils::optional<std::string> get_game_manual_file(const std::string&) {
+    return utils::nullopt;
+}
+const std::string& get_version_path_suffix() {
+    static const std::string v = "";
+    return v;
+}
+std::vector<other_version_dir> find_other_version_saves_dirs() {
+    return {};
+}
+
+// Extensions & globals
+const std::string wml_extension = ".cfg";
+const std::string map_extension = ".map";
+const blacklist_pattern_list default_blacklist;
 
 // -----------------------------------------------------------------------
 // File existence — check ROM filesystem
@@ -56,7 +75,7 @@ bool file_exists(const std::string& path) {
 
 bool is_directory(const std::string&) { return false; }
 
-time_t file_modified_time(const std::string&) { return 0; }
+std::chrono::system_clock::time_point file_modified_time(const std::string&) { return std::chrono::system_clock::time_point(); }
 
 int file_size(const std::string& path) {
     const RomFsEntry* e = n64_romfs_find_wesnoth(path.c_str());
@@ -99,7 +118,7 @@ void write_file(const std::string& path, const std::string&, std::ios_base::open
     N64_LOG("filesystem: write_file ignored on N64: %s", path.c_str());
 }
 
-std::unique_ptr<std::ostream> ostream_file(const std::string& path, std::ios_base::openmode) {
+scoped_ostream ostream_file(const std::string& path, std::ios_base::openmode, bool) {
     N64_LOG("filesystem: ostream_file ignored on N64: %s", path.c_str());
     return std::make_unique<std::ostringstream>();
 }
@@ -107,19 +126,12 @@ std::unique_ptr<std::ostream> ostream_file(const std::string& path, std::ios_bas
 // -----------------------------------------------------------------------
 // Directory operations — stubbed
 // -----------------------------------------------------------------------
-std::vector<std::string> get_files_in_dir(const std::string&,
-                                           file_name_option,
-                                           file_filter_option,
-                                           file_reorder_option) {
-    return {};
-}
-
 void get_files_in_dir(const std::string&,
                        std::vector<std::string>*,
                        std::vector<std::string>*,
-                       file_name_option,
-                       file_filter_option,
-                       file_reorder_option,
+                       name_mode,
+                       filter_mode,
+                       reorder_mode,
                        file_tree_checksum*) {
     // No-op on N64
 }
@@ -127,12 +139,31 @@ void get_files_in_dir(const std::string&,
 bool make_directory(const std::string&) { return false; }
 bool delete_file(const std::string&)    { return false; }
 bool delete_directory(const std::string&, bool) { return false; }
+void copy_file(const std::string&, const std::string&) { /* no-op on N64 */ }
 
 std::string get_exe_dir()       { return ""; }
 std::string get_cwd()           { return ""; }
+std::string get_dir(const std::string& d) { return d; }
+std::string sanitize_path(const std::string& p) { return p; }
+std::string get_next_filename(const std::string& name, const std::string& ext) { return name + ext; }
 std::string normalize_path(const std::string& p, bool, bool) { return p; }
 bool is_path_sep(char c)        { return c == '/'; }
 char path_separator()           { return '/'; }
+bool is_cfg(const std::string& f) {
+    return f.size() >= 4 && f.compare(f.size()-4, 4, ".cfg") == 0;
+}
+bool is_gzip_file(const std::string& f) {
+    return f.size() >= 3 && f.compare(f.size()-3, 3, ".gz") == 0;
+}
+bool is_bzip2_file(const std::string& f) {
+    return f.size() >= 4 && f.compare(f.size()-4, 4, ".bz2") == 0;
+}
+bool is_root(const std::string& p) {
+    return p == "/" || p.empty();
+}
+std::string root_name(const std::string&) {
+    return "/";
+}
 
 std::string base_name(const std::string& path, bool) {
     auto pos = path.rfind('/');
@@ -150,11 +181,17 @@ bool is_relative(const std::string& p) {
     return p.empty() || p[0] != '/';
 }
 
+// binary_paths_manager stub implementation
+binary_paths_manager::binary_paths_manager(const game_config_view&) {}
+binary_paths_manager::~binary_paths_manager() = default;
+void binary_paths_manager::set_paths(const game_config_view&) {}
+void binary_paths_manager::cleanup() {}
+
 // -----------------------------------------------------------------------
 // Checksum / binary paths
 // -----------------------------------------------------------------------
 std::string get_short_wml_path(const std::string& p) { return p; }
-std::string get_independent_binary_file_path(const std::string&, const std::string& f) { return f; }
+utils::optional<std::string> get_independent_binary_file_path(const std::string&, const std::string& f) { return f; }
 
 // -----------------------------------------------------------------------
 // File tree checksum (used for cache validation; trivial on N64)
