@@ -593,9 +593,13 @@ if(N64_BUILD)
         src/xBRZ/xbrz.cpp
     )
 
-    # Lua submodule — built as a separate C library (no C++ shims)
+    # Lua submodule — built as a separate C library (no C++ shims).
+    # n64_lua_stubs.c lives outside the submodule so the upstream lua/lua.git
+    # checkout stays pristine; it provides empty luaopen_os / luaopen_package
+    # bodies since loslib.c / loadlib.c are excluded from the N64 build.
     file(GLOB LUA_SOURCES "src/modules/lua/*.c")
     list(FILTER LUA_SOURCES EXCLUDE REGEX ".*(liolib|loslib|loadlib|lua\\.c|luac\\.c).*")
+    list(APPEND LUA_SOURCES "${CMAKE_SOURCE_DIR}/src/n64/n64_lua_stubs.c")
 
     add_library(wesnoth_n64_lua STATIC ${LUA_SOURCES})
     target_include_directories(wesnoth_n64_lua PRIVATE

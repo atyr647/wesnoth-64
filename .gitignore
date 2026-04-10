@@ -35,6 +35,9 @@ src/Testing/
 .sconf_temp
 buildlog.txt
 
+# N64 port out-of-tree build directory
+build-n64/
+
 # XCode
 projectfiles/Xcode/**/build
 projectfiles/Xcode/**/DerivedData
