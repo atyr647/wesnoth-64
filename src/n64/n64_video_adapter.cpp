@@ -27,8 +27,9 @@ namespace video {
 static bool s_initialized = false;
 static bool s_headless = false;
 
-// Coordinate spaces: on N64, all three are the same (320x240, no scaling)
-static point s_resolution = {N64_SCREEN_W, N64_SCREEN_H};
+// The engine lays out at 640x480; the frame is shown at 640x240 progressive
+// (see pref_constants::min_window_width in preferences/preferences.hpp).
+static point s_resolution = {640, 480};
 
 // -----------------------------------------------------------------------
 // Initialization

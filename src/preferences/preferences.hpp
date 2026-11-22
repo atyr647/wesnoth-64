@@ -34,14 +34,30 @@ class terrain_type;
 
 namespace pref_constants
 {
+#ifdef N64_BUILD
+// Nintendo 64: the GUI is laid out at 640x480 and shown in the console's
+// highest progressive video mode, 640x240, two layout rows per scanline
+// (on a 4:3 TV those pixels are twice as tall as wide, so proportions hold).
+const int min_window_width  = 640;
+const int min_window_height = 480;
+#else
 const int min_window_width  = 1280;
 const int min_window_height = 720;
+#endif
 
+#ifdef N64_BUILD
+const int def_window_width  = 640;
+const int def_window_height = 480;
+
+const int max_window_width = 640;
+const int max_window_height = 480;
+#else
 const int def_window_width  = 1920;
 const int def_window_height = 1080;
 
 const int max_window_width = 1920;
 const int max_window_height = 1080;
+#endif
 
 const int min_font_scaling  = 80;
 const int max_font_scaling  = 150;
