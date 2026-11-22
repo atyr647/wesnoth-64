@@ -15,7 +15,7 @@ Xvfb ":$D" -screen 0 1280x960x24 -ac -nolisten tcp >/dev/null 2>&1 &
 XPID=$!
 trap 'kill -9 $APID $XPID 2>/dev/null || true; rm -f /tmp/.X$D-lock' EXIT
 sleep 2
-DISPLAY=":$D" LIBGL_ALWAYS_SOFTWARE=1 "$ARES" --system "Nintendo 64" \
+DISPLAY=":$D" LIBGL_ALWAYS_SOFTWARE=1 SDL_AUDIODRIVER=dummy "$ARES" --system "Nintendo 64" \
     --no-file-prompt --fullscreen --setting Audio/Mute=true "$ROM" >"$LOG" 2>&1 &
 APID=$!
 sleep "$SECS"

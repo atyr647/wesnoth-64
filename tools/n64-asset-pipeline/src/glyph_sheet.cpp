@@ -21,7 +21,7 @@ namespace n64pack {
 
 // -----------------------------------------------------------------------
 // Built-in 8x8 bitmap font (first 128 chars)
-// Each character is 8 bytes, one byte per row, MSB = leftmost pixel.
+// Each character is 8 bytes, one byte per row, LSB = leftmost pixel (font8x8 convention).
 // This is the classic IBM CP437 8×8 ROM font (public domain).
 // Only a representative subset is shown here; the full 256-glyph table
 // would be a complete 2048-byte array. In production, load from a TTF.
@@ -164,7 +164,7 @@ Texture16 build_glyph_sheet(const std::filesystem::path& /*ttf_path*/) {
         for (int py = 0; py < GLYPH_H; ++py) {
             uint8_t bits = k_font_8x8[glyph][py];
             for (int px = 0; px < GLYPH_W; ++px) {
-                bool lit = (bits >> (7 - px)) & 1;
+                bool lit = (bits >> px) & 1;   // font8x8 data: bit 0 = leftmost pixel
                 // White pixel (fully opaque) or transparent
                 sheet.pixels[(oy + py) * SHEET_W + (ox + px)] =
                     lit ? 0xFFFF : 0x0000; // RGBA5551: white=0xFFFF, transparent=0x0000

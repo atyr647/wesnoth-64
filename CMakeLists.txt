@@ -643,6 +643,35 @@ if(N64_BUILD)
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp>"
     )
 
+    # Linker script: derived at configure time from libdragon's installed
+    # n64.ld so it tracks the toolchain. Changes: discard .eh_frame and
+    # .gcc_except_table (libgcc/libdragon archives carry them regardless of
+    # -fno-unwind-tables; ~1 MB of RAM we cannot spare), and replace the stock
+    # size ASSERT with the same 8 MiB limit under our own message.
+    set(N64_STOCK_LD "${N64_INST}/mips64-elf/lib/n64.ld")
+    if(NOT EXISTS "${N64_STOCK_LD}")
+        message(FATAL_ERROR "libdragon linker script not found: ${N64_STOCK_LD}")
+    endif()
+    file(READ "${N64_STOCK_LD}" N64_LD_TEXT)
+    string(REGEX REPLACE "ASSERT\\([^\n]*\n" "" N64_LD_TEXT "${N64_LD_TEXT}")
+    string(REPLACE "    .rodata : {"
+"    /DISCARD/ : {
+        *(.eh_frame)
+        *(.eh_frame.*)
+        *(.eh_frame_hdr)
+        *(.gcc_except_table)
+        *(.gcc_except_table.*)
+    }
+    __EH_FRAME_BEGIN__ = 0;
+    .jcr : { KEEP (*(.jcr)) }
+
+    .rodata : {" N64_LD_TEXT "${N64_LD_TEXT}")
+    option(N64_ENFORCE_SIZE_LIMIT "Fail the link when the ELF exceeds the 8 MiB RDRAM budget" ON)
+    if(N64_ENFORCE_SIZE_LIMIT)
+    string(APPEND N64_LD_TEXT "\nASSERT(end - __text_start <= 8 * 1024 * 1024 - 64 * 1024 - 1024, \"ELF too big for N64 memory (8 MiB with Expansion Pak, minus reserved)\");\n")
+    endif()
+    file(WRITE "${CMAKE_BINARY_DIR}/wesnoth_n64.ld" "${N64_LD_TEXT}")
+
     # Linker script — use libdragon's standard n64.ld
     # --allow-multiple-definition: n64 stubs intentionally override real
     # implementations for symbols that won't work on N64. Stubs are linked
@@ -650,6 +679,10 @@ if(N64_BUILD)
     # they take precedence under this flag.
     target_link_options(wesnoth_n64 PRIVATE
         -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld
+        # libdragon runs C++ static constructors through this wrapper (see
+        # n64.mk N64_LDFLAGS). Without it no global constructor ever runs --
+        # including libdragon's own __inspector_init.
+        -Wl,--wrap=__do_global_ctors
         -Wl,--gc-sections
         -Wl,--allow-multiple-definition
         -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64.map
@@ -680,10 +713,38 @@ if(N64_BUILD)
         m c gcc
     )
 
+    # Platform-layer smoke test: same linker script, ROMFS and runtime code
+    # (romfs/memory/video) as the game, none of the engine. Small enough to
+    # boot and screenshot on an emulator; see src/n64/smoke/.
+    add_executable(wesnoth_n64_smoke
+        src/n64/smoke/n64_smoke_main.cpp
+        src/n64/n64_romfs.cpp
+        src/n64/n64_memory.cpp
+        src/n64/n64_video.cpp
+    )
+    target_include_directories(wesnoth_n64_smoke PRIVATE src/ src/n64/ ${N64_INST}/include)
+    target_compile_definitions(wesnoth_n64_smoke PRIVATE N64_BUILD=1)
+    target_compile_options(wesnoth_n64_smoke PRIVATE -Oz)
+    target_link_options(wesnoth_n64_smoke PRIVATE
+        -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld
+        # libdragon runs C++ static constructors through this wrapper (see
+        # n64.mk N64_LDFLAGS). Without it no global constructor ever runs --
+        # including libdragon's own __inspector_init.
+        -Wl,--wrap=__do_global_ctors
+        -Wl,--gc-sections
+        -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64_smoke.map
+    )
+    target_link_libraries(wesnoth_n64_smoke PRIVATE
+        ${N64_INST}/mips64-elf/lib/libdragon.a
+        ${N64_INST}/mips64-elf/lib/libdragonsys.a
+        m c gcc
+    )
+
     # ROMFS blob built by tools/n64-asset-pipeline (see tools/n64-build-romfs.sh).
     # Without it the ROM still builds, but n64_romfs_init() fails at boot.
     set(WESNOTH_N64_ROMFS "" CACHE FILEPATH "Path to wesnoth.wnrf to append to the ROM")
     n64_create_rom(wesnoth_n64 "${WESNOTH_N64_ROMFS}")
+    n64_create_rom(wesnoth_n64_smoke "${WESNOTH_N64_ROMFS}")
 
     # Asset pipeline tool (host-side, always built with the host compiler)
     # add_subdirectory(tools/n64-asset-pipeline)

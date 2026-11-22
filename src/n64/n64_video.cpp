@@ -88,7 +88,40 @@ extern u16 ROMFS_GLYPH_SHEET_H;
 // Framebuffer
 // -----------------------------------------------------------------------
 #ifdef N64_BUILD
-static display_context_t s_disp = 0;
+static bool s_attached = false;   // rdpq is currently attached to a framebuffer
+
+// Attach the next display buffer to the RDP if a frame is not already open.
+static void ensure_attached() {
+    if (!s_attached) {
+        rdpq_attach(display_get(), nullptr);
+        s_attached = true;
+    }
+}
+
+// RGBA5551 -> 8-bit-per-channel colour (expand 5 bits to 8 by replication).
+static libdragon_color_t to_color(N64Color c) {
+    auto ex = [](u16 v) -> u8 { return (u8)((v << 3) | (v >> 2)); };
+    return RGBA32(ex((c.v >> 11) & 0x1F), ex((c.v >> 6) & 0x1F),
+                  ex((c.v >> 1) & 0x1F), (c.v & 1) ? 255 : 0);
+}
+
+// Texture memory is a plain RGBA5551 block in the texture pool; wrap it in a
+// surface descriptor for the RDP (no copy).
+static surface_t tex_surface(const N64Texture& t) {
+    return surface_make(t.data, FMT_RGBA16, t.width, t.height, t.width * 2);
+}
+
+// Alpha-keyed (1-bit alpha) textured draw, optionally tinted.
+static void begin_textured(bool tinted, N64Color tint) {
+    rdpq_set_mode_standard();
+    rdpq_mode_alphacompare(1);
+    if (tinted) {
+        rdpq_mode_combiner(RDPQ_COMBINER_TEX_FLAT);
+        rdpq_set_prim_color(to_color(tint));
+    } else {
+        rdpq_mode_combiner(RDPQ_COMBINER_TEX);
+    }
+}
 #endif
 
 // -----------------------------------------------------------------------
@@ -96,9 +129,8 @@ static display_context_t s_disp = 0;
 // -----------------------------------------------------------------------
 void n64_video_init() {
 #ifdef N64_BUILD
-    display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
+    display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
     rdpq_init();
-    rdpq_debug_start();
 #endif
 
     // Clear command queues
@@ -112,16 +144,18 @@ void n64_video_init() {
                                   /*has_alpha=*/true);
     N64_ASSERT(s_glyph_sheet != N64_TEX_INVALID);
 
-    N64_LOG("Video init: 320x240 16-bit double-buffered, %u textures max", MAX_TEXTURES);
+    N64_LOG("Video init: 320x240 16-bit double-buffered, %u textures max", (unsigned)MAX_TEXTURES);
 }
 
 // -----------------------------------------------------------------------
-// n64_video_flip
+// n64_video_flip — finish the frame (RDP flush + show on next vblank)
 // -----------------------------------------------------------------------
 void n64_video_flip() {
 #ifdef N64_BUILD
-    display_show(s_disp);
-    s_disp = display_get();
+    if (s_attached) {
+        rdpq_detach_show();
+        s_attached = false;
+    }
 #endif
     // Reset command queues for next frame
     for (int i = 0; i < LAYER_COUNT; ++i)
@@ -129,12 +163,14 @@ void n64_video_flip() {
 }
 
 // -----------------------------------------------------------------------
-// n64_video_clear
+// n64_video_clear — start a frame and clear it to colour c
 // -----------------------------------------------------------------------
 void n64_video_clear(N64Color c) {
 #ifdef N64_BUILD
-    if (!s_disp) s_disp = display_get();
-    rdpq_attach_clear(s_disp, nullptr);
+    ensure_attached();
+    rdpq_clear(to_color(c));
+#else
+    (void)c;
 #endif
 }
 
@@ -150,16 +186,20 @@ N64TexHandle n64_tex_load(u32 rom_offset, u16 w, u16 h, bool has_alpha) {
 
     N64_ASSERT(s_tex_count < MAX_TEXTURES);
     size_t bytes = (size_t)w * h * 2; // 16-bit RGBA5551
-    N64_ASSERT(s_tex_data_used + bytes <= sizeof(s_tex_data));
+    // Cache-line (16 B) granularity: DMA targets are invalidated by line, so a
+    // texture must not share a line with its neighbour. ROMFS data is 16-byte
+    // aligned and padded, so reading the padded span is safe.
+    size_t span = (bytes + 15) & ~(size_t)15;
+    N64_ASSERT(s_tex_data_used + span <= sizeof(s_tex_data));
 
     u16* dest = reinterpret_cast<u16*>(s_tex_data + s_tex_data_used);
-    s_tex_data_used += bytes;
+    s_tex_data_used += span;
 
 #ifdef N64_BUILD
     // DMA from ROM cartridge address space into dest
     // rom_offset is an absolute ROM address provided by the asset pipeline
-    data_cache_hit_writeback_invalidate(dest, bytes);
-    dma_read(dest, rom_offset, bytes);
+    data_cache_hit_writeback_invalidate(dest, span);
+    dma_read(dest, rom_offset, span);
 #else
     // Host stub: zero the texture
     std::memset(dest, 0, bytes);
@@ -279,45 +319,38 @@ s16 n64_text_width(const char* text) {
 // -----------------------------------------------------------------------
 void n64_flush_layer(N64Layer layer) {
 #ifdef N64_BUILD
-    rdpq_mode_begin();
-    if (layer == LAYER_TERRAIN || layer == LAYER_UNITS) {
-        rdpq_mode_combiner(RDPQ_COMBINER_TEX_FLAT);
-        rdpq_mode_blender(RDPQ_BLENDER_MULTIPLY);
-    } else {
-        rdpq_mode_combiner(RDPQ_COMBINER_FLAT);
-        rdpq_mode_blender(0);
-    }
-    rdpq_mode_end();
+    ensure_attached();
 #endif
 
     for (u32 i = 0; i < s_cmd_count[layer]; ++i) {
         const DrawCmd& cmd = s_cmds[layer][i];
         switch (cmd.type) {
         case CMD_TEX: {
-            const N64Texture& t = s_tex_cache[cmd.tex.tex].tex;
 #ifdef N64_BUILD
-            rdpq_tex_blit((surface_t*)t.data, cmd.tex.x, cmd.tex.y, nullptr);
+            const N64Texture& t = s_tex_cache[cmd.tex.tex].tex;
+            surface_t surf = tex_surface(t);
+            begin_textured(false, N64Color::white());
+            rdpq_tex_blit(&surf, cmd.tex.x, cmd.tex.y, nullptr);
 #endif
             break;
         }
         case CMD_TEX_REGION: {
-            const N64Texture& t = s_tex_cache[cmd.tex_region.atlas].tex;
 #ifdef N64_BUILD
+            const N64Texture& t = s_tex_cache[cmd.tex_region.atlas].tex;
+            surface_t surf = tex_surface(t);
             rdpq_blitparms_t bp = {};
             bp.s0 = cmd.tex_region.src.x;
             bp.t0 = cmd.tex_region.src.y;
             bp.width  = cmd.tex_region.src.w;
             bp.height = cmd.tex_region.src.h;
-            rdpq_tex_blit((surface_t*)t.data, cmd.tex_region.x, cmd.tex_region.y, &bp);
+            begin_textured(false, N64Color::white());
+            rdpq_tex_blit(&surf, cmd.tex_region.x, cmd.tex_region.y, &bp);
 #endif
             break;
         }
         case CMD_RECT:
 #ifdef N64_BUILD
-            rdpq_set_prim_color(RGBA32(
-                (cmd.rect.c.v >> 11) & 0x1F,
-                (cmd.rect.c.v >>  6) & 0x1F,
-                (cmd.rect.c.v >>  1) & 0x1F, 255));
+            rdpq_set_mode_fill(to_color(cmd.rect.c));
             rdpq_fill_rectangle(cmd.rect.r.x, cmd.rect.r.y,
                                 cmd.rect.r.x + cmd.rect.r.w,
                                 cmd.rect.r.y + cmd.rect.r.h);
@@ -325,25 +358,27 @@ void n64_flush_layer(N64Layer layer) {
             break;
         case CMD_HLINE:
 #ifdef N64_BUILD
-            rdpq_set_prim_color(RGBA32(0,0,0,255));
+            rdpq_set_mode_fill(to_color(cmd.hline.c));
             rdpq_fill_rectangle(cmd.hline.x1, cmd.hline.y,
                                 cmd.hline.x2 + 1, cmd.hline.y + 1);
 #endif
             break;
         case CMD_TEXT: {
-            // Blit glyph by glyph from the glyph sheet
+            // Blit glyph by glyph from the glyph sheet, tinted by the text colour
             const char* s = n64_str(cmd.text.str_handle);
-            const N64Texture& sheet = s_tex_cache[s_glyph_sheet].tex;
             s16 cx = cmd.text.x;
+#ifdef N64_BUILD
+            surface_t sheet = tex_surface(s_tex_cache[s_glyph_sheet].tex);
+            begin_textured(true, cmd.text.c);
+#endif
             while (*s) {
                 unsigned char c = (unsigned char)*s++;
-                s16 gx = (c % GLYPHS_PER_ROW) * GLYPH_W;
-                s16 gy = (c / GLYPHS_PER_ROW) * GLYPH_H;
 #ifdef N64_BUILD
                 rdpq_blitparms_t bp = {};
-                bp.s0 = gx; bp.t0 = gy;
+                bp.s0 = (c % GLYPHS_PER_ROW) * GLYPH_W;
+                bp.t0 = (c / GLYPHS_PER_ROW) * GLYPH_H;
                 bp.width = GLYPH_W; bp.height = GLYPH_H;
-                rdpq_tex_blit((surface_t*)sheet.data, cx, cmd.text.y, &bp);
+                rdpq_tex_blit(&sheet, cx, cmd.text.y, &bp);
 #endif
                 cx += GLYPH_W;
             }
