@@ -44,8 +44,12 @@ set(CMAKE_CXX_FLAGS_INIT "${N64_COMMON_FLAGS} ${N64_INCLUDE_FLAGS} -std=gnu++20"
 
 # Linker flags — link against libdragon, newlib-nano
 set(N64_LIB_PATH "${N64_INST}/mips64-elf/lib")
+# Libraries are linked per target (after the target's objects). Listing them
+# here would put them ahead of every object file, so libdragon's archive members
+# would be chosen before a target's own definitions (e.g. the pager's
+# __wrap___do_global_ctors).
 set(CMAKE_EXE_LINKER_FLAGS_INIT
-    "-L${N64_LIB_PATH} -ldragon -lc -lm -ldragonsys -Wl,--gc-sections -Wl,-Map=wesnoth_n64.map"
+    "-L${N64_LIB_PATH} -Wl,--gc-sections"
 )
 
 # ROM image output
@@ -102,6 +106,41 @@ function(n64_create_rom target)
                 ${ROMFS_ARGS}
                 --align 8   ${SYM_FILE}
         COMMENT "Creating N64 ROM: ${target}.z64"
+        VERBATIM
+    )
+endfunction()
+
+# Helper: ROM for a demand-paged program (linked with cmake/n64_paged.ld).
+# The .paged section is cut out of the ELF into <target>.pgc, which n64tool
+# stores in the ROM (found at runtime via the TOC); the rest is the boot ELF.
+function(n64_create_paged_rom target)
+    set(ROMFS_ARGS "")
+    if(ARGC GREATER 1 AND EXISTS "${ARGV1}")
+        set(ROMFS_ARGS --align 256 "${ARGV1}")
+    endif()
+    set(ELF_FILE   "$<TARGET_FILE:${target}>")
+    set(ELF_DIR    "$<TARGET_FILE_DIR:${target}>")
+    set(SYM_FILE   "${ELF_DIR}/${target}.elf.sym")
+    set(PAGED      "${ELF_DIR}/${target}.pgc")
+    set(BOOT       "${ELF_DIR}/${target}.boot")
+    set(ROM_FILE   "${ELF_DIR}/${target}.z64")
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E env "N64_INST=${N64_INST}"
+                ${N64_INST}/bin/n64sym ${ELF_FILE} ${SYM_FILE}
+        COMMAND ${TOOLCHAIN_PREFIX}objcopy -O binary -j .paged ${ELF_FILE} ${PAGED}
+        COMMAND ${TOOLCHAIN_PREFIX}objcopy -R .paged ${ELF_FILE} ${BOOT}
+        COMMAND ${TOOLCHAIN_PREFIX}strip -s ${BOOT}
+        COMMAND ${CMAKE_COMMAND} -E env "N64_INST=${N64_INST}"
+                ${N64_INST}/bin/n64elfcompress -o ${ELF_DIR} -c 1 ${BOOT}
+        COMMAND ${CMAKE_COMMAND} -E env "N64_INST=${N64_INST}"
+                ${N64_INST}/bin/n64tool
+                --title "Wesnoth"
+                --toc
+                --output ${ROM_FILE}
+                --align 256 ${BOOT}
+                --align 16  ${PAGED}
+                ${ROMFS_ARGS}
+        COMMENT "Creating demand-paged N64 ROM: ${target}.z64"
         VERBATIM
     )
 endfunction()

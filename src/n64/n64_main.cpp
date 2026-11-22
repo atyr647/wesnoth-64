@@ -3,17 +3,9 @@
  *
  * Nintendo 64 entry point for Wesnoth.
  *
- * Replaces src/wesnoth.cpp's main() for N64 targets.
- * On N64 the CRT calls main() after hardware init; from there we:
- *
- *   1. Initialise all N64 subsystems (memory, video, audio, input, ROM FS)
- *   2. Detect Expansion Pak (require 8 MB)
- *   3. Load the ROM filesystem directory
- *   4. Initialise Wesnoth's own systems (config, game data, Lua kernel)
- *   5. Run the game loop (title screen → campaign select → gameplay)
- *
- * The multiplayer Client App connection is established lazily when the
- * player selects "Online Multiplayer" from the main menu.
+ * Initialises the N64 platform layer (memory pools, ROM filesystem, video,
+ * audio, input; Expansion Pak check), then calls Wesnoth's own main() from
+ * src/wesnoth.cpp, which runs the unmodified start-up and game loop.
  */
 
 #include "n64_platform.hpp"
@@ -38,6 +30,9 @@
 #  include "preferences/preferences.hpp"
 #  include "serialization/schema_validator.hpp"
 
+// Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
+int wesnoth_main(int argc, char** argv);
+
 // -----------------------------------------------------------------------
 // Expansion Pak check — Wesnoth N64 requires 8 MB
 // -----------------------------------------------------------------------
@@ -61,7 +56,11 @@ static void check_expansion_pak() {
 // -----------------------------------------------------------------------
 // N64 main — execution begins here
 // -----------------------------------------------------------------------
+#ifdef N64_PAGED
+extern "C" int n64_paged_main() {   // entered from the resident pager's main()
+#else
 int main() {
+#endif
     // --- Phase 0: Hardware init ---
     debug_init_isviewer();       // USB debug output (ISViewer/64drive)
     debug_init_usblog();         // USB log buffer
@@ -87,42 +86,21 @@ int main() {
     // --- Phase 5: Input ---
     n64_input_init();
 
-    // --- Phase 6: Wesnoth config / prefs ---
-    // On N64, preferences are read from cartridge SRAM (if available)
-    // and game data is loaded from ROM instead of filesystem.
-    // game_config_manager reads WML; on N64 this reads binary WML from ROM.
-    lg::set_log_domain_severity("all", lg::err());  // suppress verbose logging
-
-    // Load game data from ROM filesystem
-    // The game_config_manager is initialised with a custom N64 filesystem
-    // backend (src/n64/n64_filesystem_backend.cpp) instead of boost::filesystem
-    game_classification classification;
-    game_config_manager::get()->load_game_config_for_game(classification, "");
-
-    // --- Phase 7: Title screen and main menu loop ---
-    // game_launcher handles the entire title → campaign select → gameplay
-    // loop. On N64 it is configured to skip the add-on manager, map editor,
-    // and multiplayer server browser (unless USB NetLib is detected).
-    // N64 uses an empty argument list for commandline_options
-    const std::vector<std::string> n64_args = {"wesnoth"};
-    commandline_options cmdline_opts(n64_args);
-    game_launcher launcher(cmdline_opts);
-
-    // Check for NetLib connection (optional — only for online MP)
-    bool has_network = n64_netlib_init();
-    N64_LOG("NetLib: %s", has_network ? "connected" : "not connected (single-player only)");
-
-    // Main game loop
-    while (launcher.play_campaign()) {
-        // n64_audio_update() keeps the music streaming each frame
-        // The game loop inside play_campaign() calls n64_input_poll() and
-        // n64_video_flip() via the SDL shim.
-    }
+    // --- Phase 6: hand over to Wesnoth's own main() (src/wesnoth.cpp) ---
+    // Everything from here on is the unmodified engine start-up path:
+    // command line, game_launcher, fonts, language, video, gui2::init, the
+    // loading screen with game_config_manager::init_game_config, the plugin
+    // Lua kernel and the title-screen loop. wesnoth.cpp is compiled with
+    // -Dmain=wesnoth_main for N64 (see CMakeLists.txt).
+    static char arg0[] = "wesnoth";
+    static char* argv[] = { arg0, nullptr };
+    N64_LOG("Entering Wesnoth main()");
+    const int rc = wesnoth_main(1, argv);
 
     // --- Shutdown ---
     n64_audio_shutdown();
-    N64_LOG("Wesnoth N64 exiting.");
-    return 0;
+    N64_LOG("Wesnoth N64 exiting (%d).", rc);
+    return rc;
 }
 
 #else // !N64_BUILD — host build entry point for testing

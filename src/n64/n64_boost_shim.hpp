@@ -1898,3 +1898,22 @@ namespace boost { namespace iostreams {
 #define BOOST_PP_STRINGIZE_I(text) #text
 
 #endif // N64_BUILD
+
+// -----------------------------------------------------------------------
+// boost::process -- used only by game_launcher to start a local wesnothd
+// (networked multiplayer). The console cannot start processes; this fails the
+// same way it does on a PC without wesnothd installed, and the engine handles
+// that path itself.
+// -----------------------------------------------------------------------
+#include <stdexcept>
+namespace boost { namespace process {
+struct process_error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+struct child {
+    template<class... A> explicit child(A&&...) {
+        throw process_error("cannot start processes on the Nintendo 64");
+    }
+    void detach() {}
+};
+}} // namespace boost::process

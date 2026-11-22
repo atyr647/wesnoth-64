@@ -50,6 +50,7 @@ static void print_usage(const char* prog) {
         "  --no-music          Skip music (this is the default)\n"
         "  --music-budget-mb <n>  Pack music, smallest tracks first, up to n MB\n"
         "  --sfx-max-ms <n>    Truncate sound effects longer than n ms (default: 1500)\n"
+        "  --no-sfx            Skip sound effects\n"
         "  --english-only      Skip non-English translations\n"
         "  --verbose           Verbose output\n"
         "  --help              Show this help\n"
@@ -199,6 +200,7 @@ int main(int argc, char** argv) {
             opts.music_budget_mb = std::max(0, std::atoi(argv[++i]));
             opts.convert_music = opts.music_budget_mb > 0;
         }
+        else if (std::strcmp(argv[i], "--no-sfx") == 0) { opts.sfx_max_ms = -1; }
         else if (std::strcmp(argv[i], "--sfx-max-ms") == 0 && i + 1 < argc) {
             opts.sfx_max_ms = std::max(0, std::atoi(argv[++i]));
         }
@@ -322,6 +324,7 @@ int main(int argc, char** argv) {
             ++img_count;
 
         } else if (is_sfx(p)) {
+            if (opts.sfx_max_ms < 0) continue;          // --no-sfx
             entry.type = ASSET_SFX;
             entry.data = convert_sfx(p, opts.sfx_max_ms);
             if (entry.data.empty()) continue;

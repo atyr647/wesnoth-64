@@ -498,6 +498,17 @@ inline int  SDL_InitSubSystem(u32) { return 0; }
 inline void SDL_Quit() {}
 inline const char* SDL_GetError() { return ""; }
 inline int SDL_SetHint(const char*, const char*) { return 1; }
+#define SDL_HINT_NO_SIGNAL_HANDLERS "SDL_NO_SIGNAL_HANDLERS"
+// newlib keeps a process environment; route SDL's setenv to it.
+inline int SDL_setenv(const char* name, const char* value, int overwrite) { return ::setenv(name, value, overwrite); }
+// No OS dialogs on the console: message boxes go to the debug log.
+#define SDL_MESSAGEBOX_ERROR       0x00000010
+#define SDL_MESSAGEBOX_WARNING     0x00000020
+#define SDL_MESSAGEBOX_INFORMATION 0x00000040
+inline int SDL_ShowSimpleMessageBox(u32, const char* title, const char* message, struct SDL_Window*) {
+    N64_LOG("%s: %s", title ? title : "", message ? message : "");
+    return 0;
+}
 inline u32 SDL_GetTicks() {
 #ifdef N64_BUILD
     extern u64 get_ticks_ms();

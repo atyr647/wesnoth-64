@@ -26,6 +26,11 @@ if(N64_BUILD)
 
     # N64 game target
     file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp" "src/n64/*.c")
+    # app/, smoke/ and pager/ hold separate programs and the paging runtime;
+    # they must not be swept into the engine (each defines its own main()).
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/(app|smoke|pager)/")
+    # Superseded by the real src/game_launcher.cpp.
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_game_launcher\\.cpp$")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
@@ -247,6 +252,10 @@ if(N64_BUILD)
         src/fake_unit_manager.cpp
         src/fake_unit_ptr.cpp
         src/commandline_options.cpp
+        # Wesnoth's real start-up path (entered from src/n64/n64_main.cpp)
+        src/wesnoth.cpp
+        src/game_launcher.cpp
+        src/commandline_argv.cpp
         src/game_classification.cpp
         src/mp_game_settings.cpp
         src/language.cpp
@@ -617,6 +626,43 @@ if(N64_BUILD)
     # The full-engine port does not fit the console's 8 MiB (ELF ~9.2 MB, plus
     # heap) and is opt-in: `cmake --build . --target wesnoth_n64` with
     # -DN64_ENFORCE_SIZE_LIMIT=OFF. The default ROM is wesnoth_n64_app below.
+    # Template functions that libstdc++.a defines (weak/COMDAT) are also emitted
+    # by our code; the linker keeps one copy. libstdc++ itself is resident and
+    # calls them with direct jumps, so whichever copy is kept must be resident.
+    # Generate a linker-script fragment (INCLUDEd by cmake/n64_paged.ld) naming
+    # their sections.
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libstdc++.a
+                    OUTPUT_VARIABLE N64_LIBSTDCXX OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND ${TOOLCHAIN_PREFIX}nm ${N64_LIBSTDCXX}
+                    OUTPUT_VARIABLE N64_LIBSTDCXX_NM ERROR_QUIET)
+    string(REGEX MATCHALL "[0-9a-f]+ W [^\n]+" N64_WEAK_LINES "${N64_LIBSTDCXX_NM}")
+    set(N64_WEAK_FRAGMENT "/* generated from ${N64_LIBSTDCXX}: weak functions kept resident */\n")
+    set(N64_WEAK_SEEN "")
+    foreach(line IN LISTS N64_WEAK_LINES)
+        string(REGEX REPLACE "^[0-9a-f]+ W " "" sym "${line}")
+        list(APPEND N64_WEAK_SEEN "${sym}")
+    endforeach()
+    list(REMOVE_DUPLICATES N64_WEAK_SEEN)
+    foreach(sym IN LISTS N64_WEAK_SEEN)
+        # GCC may place a function in .text.unlikely./.hot./.startup. variants.
+        string(APPEND N64_WEAK_FRAGMENT
+            "*(.text.${sym} .text.unlikely.${sym} .text.hot.${sym} .text.startup.${sym})\n")
+    endforeach()
+    file(WRITE ${CMAKE_BINARY_DIR}/n64_resident_weak.ld "${N64_WEAK_FRAGMENT}")
+
+    # Paged programs supply their own __wrap___do_global_ctors (the pager must
+    # be installed before any constructor runs). libdragon's do_ctors.o is
+    # always linked (crtbegin.o and dlfcn.o need its __register_frame_info),
+    # so link paged targets against a copy of libdragon.a with libdragon's
+    # version of that one function made weak.
+    set(N64_LIBDRAGON_PAGED ${CMAKE_BINARY_DIR}/libdragon_paged.a)
+    add_custom_command(OUTPUT ${N64_LIBDRAGON_PAGED}
+        COMMAND ${TOOLCHAIN_PREFIX}objcopy --weaken-symbol=__wrap___do_global_ctors
+                ${N64_INST}/mips64-elf/lib/libdragon.a ${N64_LIBDRAGON_PAGED}
+        DEPENDS ${N64_INST}/mips64-elf/lib/libdragon.a
+        COMMENT "libdragon_paged.a (pager-owned constructor runner)")
+    add_custom_target(libdragon_paged DEPENDS ${N64_LIBDRAGON_PAGED})
+
     add_executable(wesnoth_n64 EXCLUDE_FROM_ALL ${N64_GAME_SOURCES})
 
     target_include_directories(wesnoth_n64 PRIVATE
@@ -680,11 +726,24 @@ if(N64_BUILD)
     # implementations for symbols that won't work on N64. Stubs are linked
     # first (via N64_PLATFORM_SOURCES at the head of the source list), so
     # they take precedence under this flag.
+    # The engine is demand-paged: its code, read-only data and exception tables
+    # live in ROM and are paged into RAM by src/n64/pager (cmake/n64_paged.ld).
+    # The pager provides the constructor runner libdragon's entry point calls.
+    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_pager.c)
+    target_include_directories(wesnoth_n64 PRIVATE src/n64/pager/)
+    target_compile_definitions(wesnoth_n64 PRIVATE N64_PAGED=1)
+    # Resident code must be real object code (not LTO IR), or its sections
+    # would not carry the file names cmake/n64_paged.ld selects on.
+    set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
+        PROPERTIES COMPILE_OPTIONS "-fno-lto")
+    # Wesnoth's own main() is entered from src/n64/n64_main.cpp after platform
+    # initialisation; rename it so it does not collide with the entry point.
+    set_source_files_properties(src/wesnoth.cpp PROPERTIES COMPILE_DEFINITIONS "main=wesnoth_main")
+    add_dependencies(wesnoth_n64 libdragon_paged)
+    set_target_properties(wesnoth_n64 PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/cmake/n64_paged.ld)
     target_link_options(wesnoth_n64 PRIVATE
-        -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld
-        # libdragon runs C++ static constructors through this wrapper (see
-        # n64.mk N64_LDFLAGS). Without it no global constructor ever runs --
-        # including libdragon's own __inspector_init.
+        -T ${CMAKE_SOURCE_DIR}/cmake/n64_paged.ld
+        -L${CMAKE_BINARY_DIR}
         -Wl,--wrap=__do_global_ctors
         -Wl,--gc-sections
         -Wl,--allow-multiple-definition
@@ -697,20 +756,20 @@ if(N64_BUILD)
     # -fno-asynchronous-unwind-tables -fno-unwind-tables drop .eh_frame /
     # .gcc_except_table which add ~1MB of unwind data we cannot afford.
     # (Wesnoth uses dynamic_cast so we cannot disable RTTI.)
+    # -mlong-calls: paged code (kseg2) calls resident code (kseg0), which is a
+    # different 256 MiB jump region. C++ exception tables are kept: the engine
+    # relies on exceptions, and with paging they cost ROM, not RAM.
     target_compile_options(wesnoth_n64 PRIVATE
-        -Oz -flto=auto -ffat-lto-objects
-        -fno-asynchronous-unwind-tables -fno-unwind-tables)
+        -Oz -flto=auto -ffat-lto-objects -mlong-calls)
     target_compile_options(wesnoth_n64_lua PRIVATE
-        -Oz -flto=auto -ffat-lto-objects
-        -fno-asynchronous-unwind-tables -fno-unwind-tables)
+        -Oz -flto=auto -ffat-lto-objects -mlong-calls)
     target_link_options(wesnoth_n64 PRIVATE
-        -Oz -flto=auto
-        -fno-asynchronous-unwind-tables -fno-unwind-tables)
+        -Oz -flto=auto -mlong-calls)
 
     # Link libdragon + zlib (for save compression)
     target_link_libraries(wesnoth_n64 PRIVATE
         wesnoth_n64_lua
-        ${N64_INST}/mips64-elf/lib/libdragon.a
+        ${N64_LIBDRAGON_PAGED}
         ${N64_INST}/mips64-elf/lib/libdragonsys.a
         # zlib stubbed inline for N64 (no compression, just memcpy)
         m c gcc
@@ -770,12 +829,47 @@ if(N64_BUILD)
         m c gcc
     )
 
+
+    # Demand-paged variant of the front-end: same program, but its code and
+    # read-only data live in ROM and are paged into a small frame pool by
+    # src/n64/pager. Built with only 2 frames (32 KiB) so it evicts constantly;
+    # it validates the mechanism the full engine needs (its code is > RAM).
+    add_executable(wesnoth_n64_app_paged
+        src/n64/app/n64_app_main.cpp
+        src/n64/n64_romfs.cpp
+        src/n64/n64_memory.cpp
+        src/n64/n64_video.cpp
+        src/n64/n64_audio.cpp
+        src/n64/n64_input.cpp
+        src/n64/n64_gui.cpp
+        src/n64/pager/n64_pager.c
+        src/n64/n64_libgcc.c
+    )
+    target_include_directories(wesnoth_n64_app_paged PRIVATE src/ src/n64/ src/n64/pager/ ${N64_INST}/include)
+    target_compile_definitions(wesnoth_n64_app_paged PRIVATE N64_BUILD=1 N64_PAGED=1 N64_PAGER_FRAMES=2)
+    target_compile_options(wesnoth_n64_app_paged PRIVATE -Oz -mlong-calls)
+    target_link_options(wesnoth_n64_app_paged PRIVATE
+        -T ${CMAKE_SOURCE_DIR}/cmake/n64_paged.ld
+        -L${CMAKE_BINARY_DIR}
+        -Wl,--wrap=__do_global_ctors
+        -Wl,--gc-sections
+        -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64_app_paged.map
+    )
+    add_dependencies(wesnoth_n64_app_paged libdragon_paged)
+    target_link_libraries(wesnoth_n64_app_paged PRIVATE
+        ${N64_LIBDRAGON_PAGED}
+        ${N64_INST}/mips64-elf/lib/libdragonsys.a
+        m c gcc
+    )
+    set_target_properties(wesnoth_n64_app_paged PROPERTIES LINK_DEPENDS ${CMAKE_SOURCE_DIR}/cmake/n64_paged.ld)
+
     # ROMFS blob built by tools/n64-asset-pipeline (see tools/n64-build-romfs.sh).
     # Without it the ROM still builds, but n64_romfs_init() fails at boot.
     set(WESNOTH_N64_ROMFS "" CACHE FILEPATH "Path to wesnoth.wnrf to append to the ROM")
-    n64_create_rom(wesnoth_n64 "${WESNOTH_N64_ROMFS}")
+    n64_create_paged_rom(wesnoth_n64 "${WESNOTH_N64_ROMFS}")
     n64_create_rom(wesnoth_n64_smoke "${WESNOTH_N64_ROMFS}")
     n64_create_rom(wesnoth_n64_app "${WESNOTH_N64_ROMFS}")
+    n64_create_paged_rom(wesnoth_n64_app_paged "${WESNOTH_N64_ROMFS}")
 
     # Asset pipeline tool (host-side, always built with the host compiler)
     # add_subdirectory(tools/n64-asset-pipeline)

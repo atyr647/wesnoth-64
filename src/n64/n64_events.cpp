@@ -22,6 +22,10 @@
 
 namespace events {
 
+// The console runs a single thread; record it as the main thread as the real
+// events.cpp does (is_in_main_thread() compares against it).
+void set_main_thread() {}
+
 // -----------------------------------------------------------------------
 // Handler management
 // -----------------------------------------------------------------------

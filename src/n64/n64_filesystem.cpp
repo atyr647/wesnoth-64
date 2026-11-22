@@ -35,12 +35,21 @@ namespace filesystem {
 // -----------------------------------------------------------------------
 // Paths — on N64 these are all fixed / empty
 // -----------------------------------------------------------------------
-std::string get_user_config_dir()    { return ""; }
-std::string get_user_data_dir()      { return ""; }
+// User data/cache locations as set by wesnoth.cpp at start-up (the real
+// filesystem.cpp keeps the same state). Persistent user data lives in cart
+// save memory; these are logical paths within it.
+static std::string s_user_data_dir;
+static std::string s_cache_dir;
+bool is_userdata_initialized()                      { return !s_user_data_dir.empty(); }
+void set_user_data_dir(std::string newprefdir)      { s_user_data_dir = newprefdir.empty() ? "/userdata" : newprefdir; }
+void set_cache_dir(const std::string& newcachedir)  { s_cache_dir = newcachedir; }
+
+std::string get_user_config_dir()    { return s_user_data_dir; }
+std::string get_user_data_dir()      { return s_user_data_dir; }
 std::string get_saves_dir()          { return ""; }
 std::string get_addons_dir()         { return ""; }
 std::string get_logs_dir()           { return ""; }
-std::string get_cache_dir()          { return ""; }
+std::string get_cache_dir()          { return s_cache_dir; }
 utils::optional<std::string> get_wml_location(const std::string& path, const utils::optional<std::string>&) {
     return path; // resolved via ROMFS
 }

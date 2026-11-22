@@ -506,7 +506,15 @@ static void browse() {
 }
 
 // -----------------------------------------------------------------------
+#ifdef N64_PAGER_FRAMES
+extern "C" uint32_t n64_pager_frames_requested = N64_PAGER_FRAMES;
+#endif
+
+#ifdef N64_PAGED
+extern "C" int n64_paged_main() {      // entered from the resident pager's main()
+#else
 int main() {
+#endif
     debug_init_isviewer();
     debug_init_usblog();
 

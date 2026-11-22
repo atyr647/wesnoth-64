@@ -127,6 +127,10 @@ int getentropy(void* buf, unsigned int n) {
 
 int geteuid(void) { return 0; }
 
+/* newlib has no dup2; log.cpp treats failure as "could not redirect". */
+#include <errno.h>
+int dup2(int oldfd, int newfd) { (void)oldfd; (void)newfd; errno = ENOSYS; return -1; }
+
 struct passwd; /* opaque */
 struct passwd* getpwuid(int uid) { (void)uid; return 0; }
 
