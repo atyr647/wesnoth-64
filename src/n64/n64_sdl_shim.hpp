@@ -411,28 +411,30 @@ struct SDL_Keysym {
     SDL_Keycode sym;
     u16 mod;
 };
-struct SDL_KeyboardEvent {
-    u32 type;
-    SDL_Keysym keysym;
-    u8 repeat;
-};
-struct SDL_MouseMotionEvent  { u32 type; u32 state; s32 x, y, xrel, yrel; };
-struct SDL_MouseButtonEvent  { u32 type; u8 button; u8 state; u8 clicks; s32 x, y; };
-struct SDL_MouseWheelEvent   { u32 type; s32 x, y; };
-struct SDL_UserEvent         { u32 type; int code; void* data1; void* data2; };
-struct SDL_QuitEvent         { u32 type; };
-struct SDL_TouchFingerEvent  { u32 type; u32 timestamp; s64 touchId; s64 fingerId; float x, y, dx, dy; float pressure; };
-struct SDL_TextInputEvent    { u32 type; char text[32]; };
-struct SDL_TextEditingEvent  { u32 type; char text[32]; s32 start; s32 length; };
-struct SDL_WindowEvent       { u32 type; u8 event; s32 data1; s32 data2; };
-struct SDL_MultiGestureEvent { u32 type; float x, y, dTheta, dDist; u16 numFingers; };
-struct SDL_JoyAxisEvent      { u32 type; s32 which; u8 axis; s16 value; };
-struct SDL_JoyHatEvent       { u32 type; s32 which; u8 hat; u8 value; };
-struct SDL_JoyButtonEvent    { u32 type; s32 which; u8 button; u8 state; };
-struct SDL_SysWMEvent        { u32 type; };
+// Event structures with SDL 2's exact layouts (SDL_events.h), so the engine's
+// own events.cpp and GUI code compile and behave unchanged.
+struct SDL_CommonEvent       { u32 type; u32 timestamp; };
+struct SDL_KeyboardEvent     { u32 type; u32 timestamp; u32 windowID; u8 state; u8 repeat; u8 padding2, padding3; SDL_Keysym keysym; };
+struct SDL_MouseMotionEvent  { u32 type; u32 timestamp; u32 windowID; u32 which; u32 state; s32 x, y, xrel, yrel; };
+struct SDL_MouseButtonEvent  { u32 type; u32 timestamp; u32 windowID; u32 which; u8 button; u8 state; u8 clicks; u8 padding1; s32 x, y; };
+struct SDL_MouseWheelEvent   { u32 type; u32 timestamp; u32 windowID; u32 which; s32 x, y; u32 direction; float preciseX, preciseY; s32 mouseX, mouseY; };
+struct SDL_UserEvent         { u32 type; u32 timestamp; u32 windowID; s32 code; void* data1; void* data2; };
+struct SDL_QuitEvent         { u32 type; u32 timestamp; };
+struct SDL_TouchFingerEvent  { u32 type; u32 timestamp; s64 touchId; s64 fingerId; float x, y, dx, dy; float pressure; u32 windowID; };
+struct SDL_TextInputEvent    { u32 type; u32 timestamp; u32 windowID; char text[32]; };
+struct SDL_TextEditingEvent  { u32 type; u32 timestamp; u32 windowID; char text[32]; s32 start; s32 length; };
+struct SDL_WindowEvent       { u32 type; u32 timestamp; u32 windowID; u8 event; u8 padding1, padding2, padding3; s32 data1; s32 data2; };
+struct SDL_MultiGestureEvent { u32 type; u32 timestamp; s64 touchId; float dTheta, dDist, x, y; u16 numFingers; u16 padding; };
+struct SDL_JoyAxisEvent      { u32 type; u32 timestamp; s32 which; u8 axis; u8 padding1, padding2, padding3; s16 value; u16 padding4; };
+struct SDL_JoyHatEvent       { u32 type; u32 timestamp; s32 which; u8 hat; u8 value; u8 padding1, padding2; };
+struct SDL_JoyButtonEvent    { u32 type; u32 timestamp; s32 which; u8 button; u8 state; u8 padding1, padding2; };
+struct SDL_SysWMEvent        { u32 type; u32 timestamp; void* msg; };
+#define SDL_TOUCH_MOUSEID ((u32)-1)
+#define SDL_MOUSE_TOUCHID ((s64)-1)
 
 typedef union SDL_Event {
     u32                    type;
+    SDL_CommonEvent        common;
     SDL_KeyboardEvent      key;
     SDL_MouseMotionEvent   motion;
     SDL_MouseButtonEvent   button;
@@ -448,6 +450,7 @@ typedef union SDL_Event {
     SDL_JoyHatEvent        jhat;
     SDL_JoyButtonEvent     jbutton;
     SDL_SysWMEvent         syswm;
+    u8                     padding[56];
 } SDL_Event;
 
 // -----------------------------------------------------------------------
@@ -737,20 +740,81 @@ inline int SDL_RemoveTimer(SDL_TimerID) { return 1; }
 // -----------------------------------------------------------------------
 // SDL_RWops stubs — Wesnoth uses these for file I/O abstraction
 // -----------------------------------------------------------------------
+// SDL_RWops with SDL 2's layout. The engine's filesystem_sdl.cpp builds its
+// own RWops over filesystem streams; memory RWops are implemented here.
+#define SDLCALL
+#define RW_SEEK_SET 0
+#define RW_SEEK_CUR 1
+#define RW_SEEK_END 2
+#define SDL_RWOPS_UNKNOWN   0U
+#define SDL_RWOPS_MEMORY    4U
+#define SDL_RWOPS_MEMORY_RO 5U
 struct SDL_RWops {
-    int type;
-    long (*size)(SDL_RWops*);
-    long (*seek)(SDL_RWops*, long, int);
-    size_t (*read)(SDL_RWops*, void*, size_t, size_t);
-    size_t (*write)(SDL_RWops*, const void*, size_t, size_t);
-    int (*close)(SDL_RWops*);
+    s64 (*size)(SDL_RWops* context);
+    s64 (*seek)(SDL_RWops* context, s64 offset, int whence);
+    size_t (*read)(SDL_RWops* context, void* ptr, size_t size, size_t maxnum);
+    size_t (*write)(SDL_RWops* context, const void* ptr, size_t size, size_t num);
+    int (*close)(SDL_RWops* context);
+    u32 type;
+    union {
+        struct { u8* base; u8* here; u8* stop; } mem;
+        struct { void* data1; void* data2; } unknown;
+    } hidden;
 };
-
+inline SDL_RWops* SDL_AllocRW() { return static_cast<SDL_RWops*>(::calloc(1, sizeof(SDL_RWops))); }
+inline void SDL_FreeRW(SDL_RWops* rw) { ::free(rw); }
+inline s64 SDL_RWsize(SDL_RWops* c)                         { return c->size(c); }
+inline s64 SDL_RWseek(SDL_RWops* c, s64 off, int whence)    { return c->seek(c, off, whence); }
+inline s64 SDL_RWtell(SDL_RWops* c)                         { return c->seek(c, 0, RW_SEEK_CUR); }
+inline size_t SDL_RWread(SDL_RWops* c, void* p, size_t sz, size_t n)        { return c->read(c, p, sz, n); }
+inline size_t SDL_RWwrite(SDL_RWops* c, const void* p, size_t sz, size_t n) { return c->write(c, p, sz, n); }
+inline int SDL_RWclose(SDL_RWops* c)                        { return c->close(c); }
+namespace n64_sdl_detail {
+inline s64 mem_size(SDL_RWops* c) { return c->hidden.mem.stop - c->hidden.mem.base; }
+inline s64 mem_seek(SDL_RWops* c, s64 off, int whence) {
+    u8* p = whence == RW_SEEK_SET ? c->hidden.mem.base + off
+          : whence == RW_SEEK_CUR ? c->hidden.mem.here + off : c->hidden.mem.stop + off;
+    if (p < c->hidden.mem.base) p = c->hidden.mem.base;
+    if (p > c->hidden.mem.stop) p = c->hidden.mem.stop;
+    c->hidden.mem.here = p;
+    return p - c->hidden.mem.base;
+}
+inline size_t mem_read(SDL_RWops* c, void* ptr, size_t size, size_t maxnum) {
+    if (!size) return 0;
+    size_t avail = (size_t)(c->hidden.mem.stop - c->hidden.mem.here) / size;
+    size_t n = maxnum < avail ? maxnum : avail;
+    ::memcpy(ptr, c->hidden.mem.here, n * size);
+    c->hidden.mem.here += n * size;
+    return n;
+}
+inline size_t mem_write(SDL_RWops* c, const void* ptr, size_t size, size_t num) {
+    if (c->type == SDL_RWOPS_MEMORY_RO || !size) return 0;
+    size_t avail = (size_t)(c->hidden.mem.stop - c->hidden.mem.here) / size;
+    size_t n = num < avail ? num : avail;
+    ::memcpy(c->hidden.mem.here, ptr, n * size);
+    c->hidden.mem.here += n * size;
+    return n;
+}
+inline int mem_close(SDL_RWops* c) { SDL_FreeRW(c); return 0; }
+} // namespace n64_sdl_detail
+inline SDL_RWops* SDL_RWFromConstMem(const void* mem, int size) {
+    SDL_RWops* c = SDL_AllocRW();
+    if (!c) return nullptr;
+    c->size = n64_sdl_detail::mem_size; c->seek = n64_sdl_detail::mem_seek;
+    c->read = n64_sdl_detail::mem_read; c->write = n64_sdl_detail::mem_write;
+    c->close = n64_sdl_detail::mem_close;
+    c->type = SDL_RWOPS_MEMORY_RO;
+    c->hidden.mem.base = c->hidden.mem.here = (u8*)mem;
+    c->hidden.mem.stop = (u8*)mem + size;
+    return c;
+}
+inline SDL_RWops* SDL_RWFromMem(void* mem, int size) {
+    SDL_RWops* c = SDL_RWFromConstMem(mem, size);
+    if (c) c->type = SDL_RWOPS_MEMORY;
+    return c;
+}
+// Files are opened through the engine's filesystem (filesystem::make_read_RWops).
 inline SDL_RWops* SDL_RWFromFile(const char*, const char*) { return nullptr; }
-inline SDL_RWops* SDL_RWFromMem(void*, int) { return nullptr; }
-inline SDL_RWops* SDL_RWFromConstMem(const void*, int) { return nullptr; }
-inline int  SDL_RWclose(SDL_RWops*) { return 0; }
-inline long SDL_RWsize(SDL_RWops*) { return 0; }
 
 // (SDL version info moved above SDL_image section)
 

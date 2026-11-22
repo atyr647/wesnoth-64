@@ -25,6 +25,7 @@ add_executable(wesnoth-n64-pack
     src/glyph_sheet.cpp
     src/romfs_builder.cpp
     src/lua_precompiler.cpp
+    src/vfs_pack.cpp
 )
 
 target_include_directories(wesnoth-n64-pack PRIVATE
@@ -35,6 +36,7 @@ target_include_directories(wesnoth-n64-pack PRIVATE
 target_link_libraries(wesnoth-n64-pack PRIVATE
     PNG::PNG
     ZLIB::ZLIB
+    lz4
 )
 
 if(VORBISFILE_FOUND)

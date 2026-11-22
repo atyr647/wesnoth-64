@@ -31,6 +31,10 @@ if(N64_BUILD)
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/(app|smoke|pager)/")
     # Superseded by the real src/game_launcher.cpp.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_game_launcher\\.cpp$")
+    # Superseded by the real src/filesystem.cpp running over n64_vfs.cpp.
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_filesystem\\.cpp$")
+    # Superseded by the real src/events.cpp (controller input arrives as SDL events).
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_events\\.cpp$")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
@@ -256,6 +260,38 @@ if(N64_BUILD)
         src/wesnoth.cpp
         src/game_launcher.cpp
         src/commandline_argv.cpp
+        # Map editor (part of the game)
+        src/editor/action/action.cpp
+        src/editor/action/action_item.cpp
+        src/editor/action/action_label.cpp
+        src/editor/action/action_select.cpp
+        src/editor/action/action_unit.cpp
+        src/editor/action/action_village.cpp
+        src/editor/action/mouse/mouse_action.cpp
+        src/editor/action/mouse/mouse_action_item.cpp
+        src/editor/action/mouse/mouse_action_map_label.cpp
+        src/editor/action/mouse/mouse_action_select.cpp
+        src/editor/action/mouse/mouse_action_unit.cpp
+        src/editor/action/mouse/mouse_action_village.cpp
+        src/editor/controller/editor_controller.cpp
+        src/editor/editor_display.cpp
+        src/editor/editor_main.cpp
+        src/editor/map/context_manager.cpp
+        src/editor/map/editor_map.cpp
+        src/editor/map/map_context.cpp
+        src/editor/map/map_fragment.cpp
+        src/editor/palette/editor_palettes.cpp
+        src/editor/palette/item_palette.cpp
+        src/editor/palette/location_palette.cpp
+        src/editor/palette/palette_manager.cpp
+        src/editor/palette/terrain_palettes.cpp
+        src/editor/palette/tristate_button.cpp
+        src/editor/palette/unit_palette.cpp
+        src/editor/toolkit/brush.cpp
+        src/editor/toolkit/editor_toolkit.cpp
+        src/utils/spritesheet_generator.cpp
+        src/events.cpp
+        src/filesystem_sdl.cpp
         src/game_classification.cpp
         src/mp_game_settings.cpp
         src/language.cpp
@@ -338,7 +374,9 @@ if(N64_BUILD)
         src/gui/dialogs/modal_dialog.cpp
 
         # --- Filesystem abstraction (N64: filesystem.cpp replaced by n64_filesystem.cpp) ---
-        # src/filesystem.cpp — excluded; replaced by src/n64/n64_filesystem.cpp
+        # The engine's own filesystem code, over the console VFS (n64_vfs.cpp,
+        # n64_bfs_shim.hpp).
+        src/filesystem.cpp
         src/filesystem_common.cpp
 
         # --- Font (N64: text.cpp replaced by n64_font_text.cpp, font_config.cpp uses fontconfig shim) ---

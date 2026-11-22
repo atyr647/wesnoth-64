@@ -53,84 +53,8 @@ namespace system {
 } // system
 } // boost
 
-// -----------------------------------------------------------------------
-// boost/filesystem.hpp stub
-// Only the Wesnoth paths/operations that matter on N64 are implemented.
-// The rest return sensible no-ops or ROM equivalents.
-// -----------------------------------------------------------------------
-namespace boost {
-namespace filesystem {
-
-struct path {
-    std::string p_;
-    path() {}
-    path(const char* s) : p_(s ? s : "") {}
-    path(const std::string& s) : p_(s) {}
-    path(std::string&& s) : p_(std::move(s)) {}
-    const char* c_str()          const { return p_.c_str(); }
-    const std::string& string()  const { return p_; }
-    const std::string& generic_string() const { return p_; }
-    path filename() const {
-        auto pos = p_.rfind('/');
-        return pos != std::string::npos ? path(p_.substr(pos + 1)) : *this;
-    }
-    path extension() const {
-        auto fn = filename().string();
-        auto pos = fn.rfind('.');
-        return pos != std::string::npos ? path(fn.substr(pos)) : path("");
-    }
-    path stem() const {
-        auto fn = filename().string();
-        auto pos = fn.rfind('.');
-        return pos != std::string::npos ? path(fn.substr(0, pos)) : path(fn);
-    }
-    path parent_path() const {
-        auto pos = p_.rfind('/');
-        return pos != std::string::npos ? path(p_.substr(0, pos)) : path("");
-    }
-    bool empty() const { return p_.empty(); }
-    bool operator==(const path& o) const { return p_ == o.p_; }
-    bool operator!=(const path& o) const { return p_ != o.p_; }
-    bool operator<(const path& o) const { return p_ < o.p_; }
-    path operator/(const path& o) const {
-        std::string combined = p_;
-        if (!combined.empty() && combined.back() != '/') combined += '/';
-        combined += o.p_;
-        return path(std::move(combined));
-    }
-    path& operator/=(const path& o) {
-        if (!p_.empty() && p_.back() != '/') p_ += '/';
-        p_ += o.p_;
-        return *this;
-    }
-    // Allow implicit conversion to string for compatibility
-    operator const std::string&() const { return p_; }
-    friend bool operator==(const std::string& s, const path& p) { return s == p.p_; }
-    friend bool operator==(const path& p, const std::string& s) { return p.p_ == s; }
-    friend bool operator!=(const std::string& s, const path& p) { return s != p.p_; }
-    friend bool operator!=(const path& p, const std::string& s) { return p.p_ != s; }
-};
-
-// Filesystem operations — all stub; file I/O comes from ROM on N64
-inline bool exists(const path&)                   { return false; }
-inline bool is_directory(const path&)              { return false; }
-inline bool is_directory(const path&, boost::system::error_code&) { return false; }
-inline bool is_regular_file(const path&)           { return false; }
-inline bool is_empty(const path&)                  { return true; }
-inline bool is_empty(const path&, boost::system::error_code&) { return true; }
-inline bool create_directories(const path&)        { return false; }
-inline bool remove(const path&)                    { return false; }
-inline uintmax_t file_size(const path&)            { return 0; }
-
-struct directory_iterator {
-    directory_iterator()  {} // end iterator
-    directory_iterator(const path&) {} // no real iteration on ROM
-    bool operator==(const directory_iterator& o) const { return true; }
-    bool operator!=(const directory_iterator& o) const { return false; }
-};
-
-} // filesystem
-} // boost
+// boost::filesystem / boost::iostreams file devices over the console VFS.
+#include "n64_bfs_shim.hpp"
 
 // -----------------------------------------------------------------------
 // boost/random.hpp
@@ -326,162 +250,265 @@ namespace boost {
 namespace boost {
 namespace program_options {
 
-// --- variable_value: type-erased holder returned by variables_map[] ---
+// A working subset of Boost.Program_options: Wesnoth's own option table
+// (commandline_options.cpp) is parsed for real on the console.
+
+class error : public std::logic_error {
+public:
+    error() : std::logic_error("program_options error") {}
+    explicit error(const std::string& m) : std::logic_error(m) {}
+};
+class validation_error : public error {
+public:
+    enum kind_t { invalid_option_value, multiple_values_not_allowed, at_least_one_value_required,
+                  invalid_bool_value, invalid_option, missing_value };
+    explicit validation_error(kind_t, const std::string& opt = {}, const std::string& = {})
+        : error("invalid value for option " + opt) {}
+};
+class unknown_option : public error {
+public:
+    explicit unknown_option(const std::string& name) : error("unrecognised option '" + name + "'") {}
+};
+
 class variable_value {
-    std::any storage_;
-    bool defaulted_ = true;
-    bool empty_ = true;
+    std::any v_;
+    bool defaulted_ = false;
 public:
     variable_value() = default;
-    template<typename T>
-    explicit variable_value(const T& val) : storage_(val), defaulted_(false), empty_(false) {}
-    template<typename T>
-    const T& as() const { return std::any_cast<const T&>(storage_); }
-    bool empty() const { return empty_; }
+    variable_value(std::any v, bool defaulted) : v_(std::move(v)), defaulted_(defaulted) {}
+    template<typename T> const T& as() const { return std::any_cast<const T&>(v_); }
+    template<typename T> T& as() { return std::any_cast<T&>(v_); }
+    bool empty() const { return !v_.has_value(); }
     bool defaulted() const { return defaulted_; }
+    const std::any& value() const { return v_; }
+    std::any& value() { return v_; }
 };
 
-// --- typed_value<T>: returned by value<T>(), supports chaining ---
+class variables_map : public std::map<std::string, variable_value> {};
+
+namespace detail {
+// Default conversion: std::string, integers, floating point, via istringstream.
 template<typename T>
-class typed_value {
-    T default_val_{};
-    bool has_default_ = false;
-    bool has_implicit_ = false;
-    bool multi_ = false;
-    bool composing_ = false;
+void parse_into(std::any& out, const std::vector<std::string>& tok, T*, long) {
+    if (tok.size() != 1) throw validation_error(validation_error::invalid_option_value);
+    if constexpr (std::is_same_v<T, std::string>) {
+        out = tok[0];
+    } else {
+        std::istringstream ss(tok[0]);
+        T v{};
+        if (!(ss >> v) || !ss.eof()) throw validation_error(validation_error::invalid_option_value);
+        out = v;
+    }
+}
+// User-provided validate(boost::any&, values, T*, int) found by ADL wins.
+template<typename T>
+auto parse_into(std::any& out, const std::vector<std::string>& tok, T* p, int)
+    -> decltype(validate(out, tok, p, 0), void()) { validate(out, tok, p, 0); }
+} // namespace detail
+
+struct value_semantic {
+    virtual ~value_semantic() = default;
+    bool multitoken = false, composing = false, zero_tokens = false;
+    std::any implicit, deflt;
+    virtual void parse(std::any& store, const std::vector<std::string>& tok) const = 0;
+};
+
+template<typename T>
+class typed_value : public value_semantic {
 public:
-    typed_value() = default;
-    typed_value* default_value(const T&) { has_default_ = true; return this; }
-    typed_value* implicit_value(const T&) { has_implicit_ = true; return this; }
-    typed_value* multitoken() { multi_ = true; return this; }
-    typed_value* composing() { composing_ = true; return this; }
+    typed_value* default_value(const T& v)  { deflt = v; return this; }
+    typed_value* default_value(const T& v, const std::string&) { deflt = v; return this; }
+    typed_value* implicit_value(const T& v) { implicit = v; return this; }
+    typed_value* multitoken()  { value_semantic::multitoken = true; return this; }
+    typed_value* composing()   { value_semantic::composing = true; return this; }
+    typed_value* zero_tokens() { value_semantic::zero_tokens = true; return this; }
     typed_value* value_name(const char*) { return this; }
     typed_value* value_name(const std::string&) { return this; }
+    void parse(std::any& store, const std::vector<std::string>& tok) const override {
+        if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            if (!store.has_value()) store = std::vector<std::string>();
+            auto& v = std::any_cast<std::vector<std::string>&>(store);
+            v.insert(v.end(), tok.begin(), tok.end());
+        } else {
+            std::any one;
+            detail::parse_into(one, tok, static_cast<T*>(nullptr), 0);
+            store = std::move(one);
+        }
+    }
+};
+template<typename T> typed_value<T>* value() { return new typed_value<T>(); }
+template<typename T> typed_value<T>* value(T*) { return new typed_value<T>(); }
+inline typed_value<bool>* bool_switch() { return (new typed_value<bool>())->zero_tokens(); }
+
+struct option_def {
+    std::string long_name;
+    char short_name = 0;
+    std::shared_ptr<value_semantic> sem;     // null: a flag without a value
 };
 
-template<typename T>
-typed_value<T>* value() { static typed_value<T> v; return &v; }
-
-template<typename T>
-typed_value<T>* value(T* store_to) { (void)store_to; static typed_value<T> v; return &v; }
-
-// --- options_adder: the object returned by add_options(), supports operator() chaining ---
-class options_description; // forward
-
+class options_description;
 class options_adder {
 public:
-    options_adder() = default;
-    // ("name")
-    options_adder& operator()(const char*) { return *this; }
-    // ("name", "description")
-    options_adder& operator()(const char*, const char*) { return *this; }
-    // ("name", value_semantic*, "description")
-    template<typename T>
-    options_adder& operator()(const char*, typed_value<T>*, const char* = nullptr) { return *this; }
+    explicit options_adder(options_description* d) : d_(d) {}
+    options_adder& operator()(const char* names, const char* = nullptr) { add(names, nullptr); return *this; }
+    options_adder& operator()(const char* names, value_semantic* v, const char* = nullptr) { add(names, v); return *this; }
+private:
+    void add(const char* names, value_semantic* v);
+    options_description* d_;
 };
 
-// --- options_description ---
 class options_description {
 public:
     options_description() = default;
-    options_description(const char*) {}
-    options_description(const std::string&) {}
-    options_description(const char*, unsigned) {}
-    options_adder& add_options() { return adder_; }
-    options_description& add(const options_description&) { return *this; }
-    friend std::ostream& operator<<(std::ostream& os, const options_description&) { return os; }
-private:
-    options_adder adder_;
+    explicit options_description(const std::string&, unsigned = 0, unsigned = 0) {}
+    options_description(const char*, unsigned = 0, unsigned = 0) {}
+    options_adder add_options() { return options_adder(this); }
+    options_description& add(const options_description& o) {
+        defs_.insert(defs_.end(), o.defs_.begin(), o.defs_.end());
+        return *this;
+    }
+    const option_def* find_long(const std::string& n) const {
+        for (auto& d : defs_) if (d->long_name == n) return d.get();
+        return nullptr;
+    }
+    const option_def* find_short(char c) const {
+        for (auto& d : defs_) if (d->short_name == c) return d.get();
+        return nullptr;
+    }
+    std::vector<std::shared_ptr<option_def>> defs_;
+    friend std::ostream& operator<<(std::ostream& os, const options_description& d) {
+        for (auto& o : d.defs_) os << "  --" << o->long_name << "\n";
+        return os;
+    }
 };
 
-// --- variables_map ---
-class variables_map : public std::map<std::string, variable_value> {
+inline void options_adder::add(const char* names, value_semantic* v) {
+    auto def = std::make_shared<option_def>();
+    std::string n = names ? names : "";
+    auto comma = n.find(',');
+    def->long_name = n.substr(0, comma);
+    if (comma != std::string::npos && comma + 1 < n.size()) def->short_name = n[comma + 1];
+    def->sem.reset(v);
+    d_->defs_.push_back(std::move(def));
+}
+
+class positional_options_description {
 public:
-    // count() is inherited from std::map.
-    // operator[] is inherited from std::map and returns variable_value.
+    positional_options_description& add(const char* name, int max_count) {
+        for (int i = 0; i < (max_count < 0 ? 64 : max_count); ++i) names_.push_back(name);
+        return *this;
+    }
+    std::vector<std::string> names_;
 };
 
-// --- parsed_options: result of command_line_parser::run() ---
 struct basic_option {
     std::string string_key;
     std::vector<std::string> value;
     bool unregistered = false;
 };
-
 struct parsed_options {
     std::vector<basic_option> options;
     const options_description* description = nullptr;
 };
 
-// --- positional_options_description ---
-class positional_options_description {
-public:
-    positional_options_description& add(const char*, int) { return *this; }
-};
-
-// --- command_line_style ---
 namespace command_line_style {
     enum style_t {
-        allow_short          = 1 << 0,
-        short_allow_adjacent = 1 << 1,
-        short_allow_next     = 1 << 2,
-        allow_long           = 1 << 3,
-        long_allow_adjacent  = 1 << 4,
-        long_allow_next      = 1 << 5,
-        allow_sticky         = 1 << 6,
-        allow_guessing       = 1 << 7,
-        allow_dash_for_short = 1 << 8,
-        long_allow_equal     = 1 << 9,
-        short_allow_equal    = 1 << 10,
-        case_insensitive     = 1 << 11,
-        allow_long_disguise  = 1 << 12,
-        default_style        = allow_short | short_allow_adjacent | short_allow_next
-                             | allow_long | long_allow_adjacent | long_allow_next
-                             | long_allow_equal | allow_guessing | allow_dash_for_short
+        allow_short = 1 << 0, short_allow_adjacent = 1 << 1, short_allow_next = 1 << 2,
+        allow_long = 1 << 3, long_allow_adjacent = 1 << 4, long_allow_next = 1 << 5,
+        allow_sticky = 1 << 6, allow_guessing = 1 << 7, allow_dash_for_short = 1 << 8,
+        long_allow_equal = 1 << 9, short_allow_equal = 1 << 10, case_insensitive = 1 << 11,
+        allow_long_disguise = 1 << 12,
+        default_style = allow_short | short_allow_adjacent | short_allow_next | allow_long |
+                        long_allow_adjacent | long_allow_next | long_allow_equal |
+                        allow_guessing | allow_dash_for_short
     };
 }
 
-// --- command_line_parser ---
 class command_line_parser {
 public:
-    command_line_parser(int, const char* const*) {}
-    command_line_parser(const std::vector<std::string>&) {}
-    command_line_parser& options(const options_description&) { return *this; }
-    command_line_parser& positional(const positional_options_description&) { return *this; }
-    command_line_parser& allow_unregistered() { return *this; }
+    command_line_parser(int argc, const char* const* argv) { for (int i = 1; i < argc; ++i) args_.push_back(argv[i]); }
+    explicit command_line_parser(const std::vector<std::string>& a) : args_(a) {}
+    command_line_parser& options(const options_description& d) { desc_ = &d; return *this; }
+    command_line_parser& positional(const positional_options_description& p) { pos_ = &p; return *this; }
+    command_line_parser& allow_unregistered() { allow_unreg_ = true; return *this; }
     command_line_parser& style(int) { return *this; }
-    command_line_parser& extra_parser(std::function<std::pair<std::string,std::string>(const std::string&)>) { return *this; }
-    parsed_options run() const { return parsed_options{}; }
+    command_line_parser& extra_parser(std::function<std::pair<std::string, std::string>(const std::string&)>) { return *this; }
+
+    parsed_options run() const {
+        parsed_options out;
+        out.description = desc_;
+        size_t positional_index = 0;
+        for (size_t i = 0; i < args_.size(); ++i) {
+            const std::string& a = args_[i];
+            const option_def* def = nullptr;
+            std::string inline_value;
+            bool has_inline = false;
+            if (a.size() > 2 && a[0] == '-' && a[1] == '-') {
+                std::string name = a.substr(2);
+                auto eq = name.find('=');
+                if (eq != std::string::npos) { inline_value = name.substr(eq + 1); name.resize(eq); has_inline = true; }
+                def = desc_ ? desc_->find_long(name) : nullptr;
+                if (!def) { if (allow_unreg_) { out.options.push_back({ name, {}, true }); continue; } throw unknown_option(name); }
+            } else if (a.size() > 1 && a[0] == '-' && a[1] != '-') {
+                def = desc_ ? desc_->find_short(a[1]) : nullptr;
+                if (!def) { if (allow_unreg_) { out.options.push_back({ a.substr(1), {}, true }); continue; } throw unknown_option(a); }
+                if (a.size() > 2) { inline_value = a.substr(2); has_inline = true; }
+            } else {
+                if (!pos_ || positional_index >= pos_->names_.size()) throw unknown_option(a);
+                out.options.push_back({ pos_->names_[positional_index++], { a }, false });
+                continue;
+            }
+            basic_option opt{ def->long_name, {}, false };
+            const value_semantic* sem = def->sem.get();
+            if (has_inline) {
+                opt.value.push_back(inline_value);
+            } else if (sem && !sem->zero_tokens) {
+                // Take following tokens that are not options: one, or all for multitoken.
+                bool optional = sem->implicit.has_value();
+                while (i + 1 < args_.size() && !(args_[i + 1].size() > 1 && args_[i + 1][0] == '-')) {
+                    if (optional && !sem->multitoken) break;          // implicit: only --opt=value
+                    opt.value.push_back(args_[++i]);
+                    if (!sem->multitoken) break;
+                }
+            }
+            out.options.push_back(std::move(opt));
+        }
+        return out;
+    }
+private:
+    std::vector<std::string> args_;
+    const options_description* desc_ = nullptr;
+    const positional_options_description* pos_ = nullptr;
+    bool allow_unreg_ = false;
 };
 
-// --- free functions ---
-inline void store(const parsed_options&, variables_map&) {}
+inline void store(const parsed_options& p, variables_map& vm) {
+    for (const basic_option& o : p.options) {
+        if (o.unregistered) continue;
+        const option_def* def = p.description ? p.description->find_long(o.string_key) : nullptr;
+        if (!def) continue;
+        auto& slot = vm[o.string_key];
+        std::any v = slot.value();
+        if (!def->sem) {
+            v = true;                                            // plain flag
+        } else if (o.value.empty() && def->sem->implicit.has_value()) {
+            v = def->sem->implicit;
+        } else if (o.value.empty() && !def->sem->zero_tokens) {
+            throw validation_error(validation_error::at_least_one_value_required, o.string_key);
+        } else if (def->sem->zero_tokens) {
+            v = true;
+        } else {
+            def->sem->parse(v, o.value);
+        }
+        slot = variable_value(std::move(v), false);
+    }
+    // Defaults for options not given.
+    if (p.description)
+        for (auto& d : p.description->defs_)
+            if (d->sem && d->sem->deflt.has_value() && !vm.count(d->long_name))
+                vm[d->long_name] = variable_value(d->sem->deflt, true);
+}
 inline void notify(variables_map&) {}
-
-// --- validation_error ---
-class validation_error : public std::exception {
-public:
-    enum kind_t {
-        invalid_option_value,
-        multiple_values_not_allowed,
-        at_least_one_value_required,
-        invalid_bool_value,
-        invalid_option,
-        missing_value
-    };
-    validation_error(kind_t) {}
-    validation_error(kind_t, const std::string&, const std::string& = {}) {}
-    const char* what() const noexcept override { return "validation_error"; }
-};
-
-// --- error (base exception) ---
-class error : public std::exception {
-    std::string msg_;
-public:
-    error() : msg_("program_options error") {}
-    explicit error(const std::string& m) : msg_(m) {}
-    const char* what() const noexcept override { return msg_.c_str(); }
-};
 
 } // namespace program_options
 } // namespace boost
@@ -534,15 +561,25 @@ namespace boost {
     using cmatch = std::cmatch;
     using sregex_token_iterator = std::sregex_token_iterator;
     using ssub_match = std::ssub_match;
-    inline bool regex_match(const std::string& s, smatch& m, const regex& r) {
-        return std::regex_match(s, m, r);
+    // Same API as Boost.Regex for what Wesnoth uses.
+    // Boost accepts a temporary string with a match object (std deletes that
+    // overload to prevent dangling results); callers only use the bool.
+    inline bool regex_match(const std::string& s, smatch& m, const regex& r,
+                            std::regex_constants::match_flag_type f = std::regex_constants::match_default) {
+        return std::regex_match(s.begin(), s.end(), m, r, f);
     }
-    inline bool regex_search(const std::string& s, smatch& m, const regex& r) {
-        return std::regex_search(s, m, r);
+    inline bool regex_match(const std::string& s, const regex& r,
+                            std::regex_constants::match_flag_type f = std::regex_constants::match_default) {
+        return std::regex_match(s, r, f);
     }
-    inline std::string regex_replace(const std::string& s, const regex& r,
-                                     const std::string& fmt) {
-        return std::regex_replace(s, r, fmt);
+    using std::regex_search;
+    using std::regex_replace;
+    namespace regex_constants {
+        using namespace std::regex_constants;
+        // Boost-only flag: '.' does not match NUL. WML text contains no NULs,
+        // so std's default matching is equivalent.
+        inline constexpr std::regex_constants::match_flag_type match_not_dot_null =
+            std::regex_constants::match_default;
     }
 } // boost
 
@@ -1203,6 +1240,7 @@ public:
         return c;
     }
     bool none() const { return count() == 0; }
+    bool all() const { return count() == size(); }
     bool any()  const { return !none(); }
     // Bitwise operators
     dynamic_bitset operator&(const dynamic_bitset& o) const {
@@ -1910,6 +1948,8 @@ namespace boost { namespace process {
 struct process_error : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
+// No PATH lookup on the console: no executables to find.
+inline boost::filesystem::path search_path(const boost::filesystem::path&) { return {}; }
 struct child {
     template<class... A> explicit child(A&&...) {
         throw process_error("cannot start processes on the Nintendo 64");

@@ -98,6 +98,10 @@ void n64_video_clear(N64Color c);
 // Returns a handle valid until n64_texcache_flush() is called.
 N64TexHandle n64_tex_load(u32 rom_offset, u16 w, u16 h, bool has_alpha);
 
+// Load a texture from a ROMFS entry, decompressing it if stored LZ4.
+struct RomFsEntry;
+N64TexHandle n64_tex_load_entry(const RomFsEntry* entry, bool has_alpha);
+
 // Release all cached textures (call between scenarios).
 void n64_texcache_flush();
 

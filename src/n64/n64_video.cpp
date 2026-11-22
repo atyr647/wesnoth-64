@@ -12,6 +12,7 @@
 
 #include "n64_video.hpp"
 #include "n64_memory.hpp"
+#include "n64_romfs.hpp"
 
 #ifdef N64_BUILD
 #  include <display.h>
@@ -208,6 +209,7 @@ N64TexHandle n64_tex_load(u32 rom_offset, u16 w, u16 h, bool has_alpha) {
     // rom_offset is an absolute ROM address provided by the asset pipeline
     data_cache_hit_writeback_invalidate(dest, span);
     dma_read(dest, rom_offset, span);
+    data_cache_hit_invalidate(dest, span);
 #else
     // Host stub: zero the texture
     std::memset(dest, 0, bytes);
@@ -215,6 +217,26 @@ N64TexHandle n64_tex_load(u32 rom_offset, u16 w, u16 h, bool has_alpha) {
 
     u16 handle = s_tex_count++;
     s_tex_cache[handle] = { rom_offset, { dest, w, h, has_alpha }, true };
+    return handle;
+}
+
+// -----------------------------------------------------------------------
+// n64_tex_load_entry -- as n64_tex_load, for a ROMFS entry that may be
+// LZ4-compressed (decompressed in place into the texture pool).
+// -----------------------------------------------------------------------
+N64TexHandle n64_tex_load_entry(const RomFsEntry* e, bool has_alpha) {
+    if (!e) return N64_TEX_INVALID;
+    if (!e->raw_length) return n64_tex_load(e->rom_offset, e->width, e->height, has_alpha);
+    for (u16 i = 0; i < s_tex_count; ++i)
+        if (s_tex_cache[i].in_use && s_tex_cache[i].rom_offset == e->rom_offset) return i;
+    if (s_tex_count >= MAX_TEXTURES) return N64_TEX_INVALID;
+    const u32 cap = n64_romfs_read_capacity(e);
+    if (s_tex_data_used + cap > sizeof(s_tex_data)) return N64_TEX_INVALID;
+    u8* dest = s_tex_data + s_tex_data_used;
+    if (n64_romfs_read(e, dest, cap) != (u32)e->width * e->height * 2) return N64_TEX_INVALID;
+    s_tex_data_used += ((u32)e->width * e->height * 2 + 15u) & ~15u;
+    u16 handle = s_tex_count++;
+    s_tex_cache[handle] = { e->rom_offset, { reinterpret_cast<u16*>(dest), e->width, e->height, has_alpha }, true };
     return handle;
 }
 

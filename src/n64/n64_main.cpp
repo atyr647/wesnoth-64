@@ -92,10 +92,14 @@ int main() {
     // loading screen with game_config_manager::init_game_config, the plugin
     // Lua kernel and the title-screen loop. wesnoth.cpp is compiled with
     // -Dmain=wesnoth_main for N64 (see CMakeLists.txt).
-    static char arg0[] = "wesnoth";
-    static char* argv[] = { arg0, nullptr };
+    // The data tree is the cartridge (/rom) and user data lives in /save (see
+    // n64_vfs.hpp). --nocache: the config cache stores gzip'd copies of the
+    // parsed WML, for which the console has neither space nor a codec.
+    static char a0[] = "wesnoth", a1[] = "--data-dir", a2[] = "/rom",
+                a3[] = "--userdata-dir", a4[] = "/save", a5[] = "--nocache";
+    static char* argv[] = { a0, a1, a2, a3, a4, a5, nullptr };
     N64_LOG("Entering Wesnoth main()");
-    const int rc = wesnoth_main(1, argv);
+    const int rc = wesnoth_main(6, argv);
 
     // --- Shutdown ---
     n64_audio_shutdown();

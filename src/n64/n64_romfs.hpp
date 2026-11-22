@@ -39,6 +39,7 @@ struct RomFsEntry {
     u8   type;          // RomFsType
     u16  width;         // pixel width (for textures/sprites)
     u16  height;        // pixel height (for textures/sprites)
+    u32  raw_length;    // uncompressed size if LZ4-compressed, else 0
 };
 
 enum RomFsType : u8 {
@@ -60,12 +61,12 @@ enum RomFsType : u8 {
 //
 //   RomFsHeader (32 B)
 //   RomFsWireEntry[entry_count] (32 B each), sorted by name hash
-//   string table (debug only, NUL-terminated names)
-//   asset data (16-byte aligned)
+//   string table (NUL-terminated names)
+//   asset data (16-byte aligned; LZ4 block format where raw size != 0)
 //
-// The directory stays in ROM: lookups hash the name (FNV-1a, 32 bit) and
-// binary-search the sorted table with 32-byte DMA reads. The packer rejects
-// hash collisions, so a hash identifies a file.
+// The directory stays in ROM: lookups hash the name (FNV-1a, 32 bit),
+// binary-search the table (sorted by hash, then name) with 32-byte DMA reads,
+// and confirm the stored name, so colliding hashes are resolved correctly.
 // -----------------------------------------------------------------------
 static constexpr u32 ROMFS_MAGIC = 0x574E5246; // "WNRF"
 
@@ -88,8 +89,8 @@ struct RomFsWireEntry {
     u16 height;
     u8  type;
     u8  pad[3];
-    u32 name_off;      // into the string table (debug)
-    u32 reserved[2];
+    u32 name_off;      // into the string table (verified on lookup)
+    u32 reserved[2];   // [0]: uncompressed size if LZ4-compressed, else 0
 };
 static_assert(sizeof(RomFsHeader) == 32, "RomFsHeader wire size");
 static_assert(sizeof(RomFsWireEntry) == 32, "RomFsWireEntry wire size");
@@ -118,8 +119,15 @@ const RomFsEntry* n64_romfs_find(const char* filename);
 // e.g. n64_romfs_find_wesnoth("images/terrain/grass/green.png")
 const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path);
 
-// DMA an entry's bytes into dst (cache-line aligned, capacity rounded up to 16).
-// Returns the byte length, or 0 if it does not fit.
+// Size of an entry once read (decompressed if it is stored compressed).
+inline u32 n64_romfs_size(const RomFsEntry* e) { return e->raw_length ? e->raw_length : e->byte_length; }
+
+// Buffer capacity n64_romfs_read needs for an entry: its size plus the LZ4
+// in-place margin, rounded up to 16.
+u32  n64_romfs_read_capacity(const RomFsEntry* e);
+
+// Read an entry into dst (16-byte aligned), decompressing LZ4 in place.
+// Returns the entry's (uncompressed) size, or 0 if it does not fit.
 u32  n64_romfs_read(const RomFsEntry* e, void* dst, u32 capacity);
 
 // Total number of entries in the directory.

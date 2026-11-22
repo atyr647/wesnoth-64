@@ -37,7 +37,7 @@
 #include <ranges>
 #endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(N64_BUILD) // N64: boost::filesystem runs over the console VFS
 #include <boost/filesystem.hpp>
 namespace fs = boost::filesystem;
 #else

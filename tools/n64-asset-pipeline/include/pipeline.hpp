@@ -39,6 +39,7 @@ struct AssetEntry {
     uint32_t             rom_offset;  // filled in by romfs_builder
     uint16_t             width;       // for textures: pixel width
     uint16_t             height;      // for textures: pixel height
+    uint32_t             raw_size = 0;  // uncompressed size if `data` is LZ4, else 0
 };
 
 // -----------------------------------------------------------------------
@@ -64,6 +65,8 @@ struct PipelineOptions {
     int                   music_budget_mb;    // 0 = no music; else pack smallest tracks first up to this size
     int                   sfx_max_ms;         // truncate (with fade-out) sound effects longer than this
     bool                  english_only;       // skip non-English translations
+    bool                  vfs = false;        // pack the data tree for the engine's filesystem
+    bool                  compress_all = false; // LZ4 textures and sounds too (not only text)
 };
 
 // -----------------------------------------------------------------------
@@ -105,6 +108,15 @@ Texture16 build_glyph_sheet(const std::filesystem::path& ttf_path = {});
 // lua_precompiler.cpp
 // Compile a Lua 5.4 source file to bytecode using the embedded luac.
 std::vector<uint8_t> compile_lua(const std::filesystem::path& lua_path);
+
+// vfs_pack.cpp
+// Pack data/, images/, sounds/ under exact repo-relative names with directory
+// listings ("vfs:<dir>"), for the engine's own filesystem code.
+size_t pack_vfs(const std::filesystem::path& repo_root, const PipelineOptions& opts,
+                std::vector<AssetEntry>& out);
+// LZ4-compress entries that shrink by at least 1/8 (text always; textures and
+// sounds if textures_too). Sets raw_size.
+void compress_entries(std::vector<AssetEntry>& assets, bool textures_too);
 
 // romfs_builder.cpp
 // Pack all assets into the standalone big-endian ROMFS blob (wesnoth.wnrf)

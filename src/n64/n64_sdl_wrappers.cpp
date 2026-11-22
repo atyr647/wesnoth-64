@@ -263,8 +263,7 @@ texture get_texture(const locator& loc, TYPE, bool) {
     }
 
     if (entry) {
-        N64TexHandle h = n64_tex_load(entry->rom_offset,
-                                       entry->width, entry->height, true);
+        N64TexHandle h = n64_tex_load_entry(entry, true);
         // Create a texture wrapper around this handle
         texture t;
         // On N64, the texture class stores the handle in its internal SDL_Texture*
@@ -282,6 +281,9 @@ texture get_texture(const locator& loc, TYPE, bool) {
 
     return texture(); // not found
 }
+
+// --render-image / screenshots: writing image files needs the PC image module.
+save_result save_image(const locator&, const std::string&) { return save_result::unsupported_format; }
 
 texture get_texture(const locator& loc, scale_quality, TYPE type, bool skip_cache) {
     return get_texture(loc, type, skip_cache);

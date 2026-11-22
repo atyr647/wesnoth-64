@@ -48,21 +48,26 @@ bool build_romfs(const std::vector<AssetEntry>& assets,
         }
     }
 
-    // Sort by hash; reject collisions (a hash must identify one file).
     std::vector<uint32_t> hashes(n);
     for (size_t i = 0; i < n; ++i) hashes[i] = romfs_hash(assets[i].name);
     std::vector<size_t> order(n);
     std::iota(order.begin(), order.end(), size_t(0));
-    std::sort(order.begin(), order.end(),
-              [&](size_t a, size_t b) { return hashes[a] < hashes[b]; });
+    // Sorted by (hash, name). Equal hashes are allowed: the runtime compares
+    // the stored name of each candidate (32-bit hashes do collide at ~24K
+    // names). Identical names are an error.
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return hashes[a] != hashes[b] ? hashes[a] < hashes[b] : assets[a].name < assets[b].name;
+    });
+    size_t collisions = 0;
     for (size_t i = 1; i < n; ++i) {
-        if (hashes[order[i]] == hashes[order[i - 1]]) {
-            std::fprintf(stderr, "ROMFS: hash collision between '%s' and '%s'\n",
-                         assets[order[i - 1]].name.c_str(),
-                         assets[order[i]].name.c_str());
+        if (hashes[order[i]] != hashes[order[i - 1]]) continue;
+        if (assets[order[i]].name == assets[order[i - 1]].name) {
+            std::fprintf(stderr, "ROMFS: duplicate name '%s'\n", assets[order[i]].name.c_str());
             return false;
         }
+        ++collisions;
     }
+    if (collisions) std::printf("  %zu hash collision(s), resolved by name at runtime\n", collisions);
 
     // String table (debug names).
     std::vector<uint8_t> strings;
@@ -105,6 +110,7 @@ bool build_romfs(const std::vector<AssetEntry>& assets,
         put16(blob, at + 14, assets[i].height);
         blob[at + 16] = (uint8_t)assets[i].type;
         put32(blob, at + 20, name_off[i]);
+        put32(blob, at + 24, assets[i].raw_size);     // 0 = stored uncompressed
     }
     std::memcpy(blob.data() + strings_off, strings.data(), strings.size());
     for (size_t i = 0; i < n; ++i)

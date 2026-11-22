@@ -21,6 +21,7 @@ extern "C" uint32_t rompak_search_ext(const char* ext); // libdragon rompak.c
 static u32 s_base          = 0;   // absolute cart address of the .wnrf blob
 static u32 s_entries_addr  = 0;   // absolute cart address of entry[0]
 static u32 s_entry_count   = 0;
+static u32 s_strings_addr  = 0;   // absolute cart address of the name table
 
 // Resolved at init from font/glyph_sheet.tex (absolute cart address).
 u32 ROMFS_GLYPH_SHEET_OFFSET = 0;
@@ -68,6 +69,7 @@ bool n64_romfs_init() {
     }
     s_entry_count  = s_dma.hdr.entry_count;
     s_entries_addr = s_base + s_dma.hdr.entries_off;
+    s_strings_addr = s_base + s_dma.hdr.strings_off;
 
     const RomFsEntry* glyphs = n64_romfs_find("font/glyph_sheet.tex");
     if (glyphs) {
@@ -91,28 +93,66 @@ bool n64_romfs_init() {
 // -----------------------------------------------------------------------
 // n64_romfs_find — binary search of the sorted on-ROM directory
 // -----------------------------------------------------------------------
+// Compare `name` with the stored (NUL-terminated) name at string-table offset.
+static bool name_matches(u32 name_off, const char* name) {
+#ifdef N64_BUILD
+    static char buf[64] __attribute__((aligned(16)));
+    u32 addr = s_strings_addr + name_off;
+    size_t len = strlen(name) + 1;                     // include the terminator
+    for (size_t done = 0; done < len; ) {
+        // DMA from an even address, 32 bytes at a time (PI DMA needs 2-byte phase match).
+        u32 a = (addr + done) & ~1u;
+        u32 skew = (addr + done) - a;
+        data_cache_hit_writeback_invalidate(buf, sizeof(buf));
+        dma_read(buf, a, 48);
+        data_cache_hit_invalidate(buf, sizeof(buf));
+        size_t chunk = 48 - skew;
+        if (chunk > len - done) chunk = len - done;
+        if (memcmp(buf + skew, name + done, chunk) != 0) return false;
+        done += chunk;
+    }
+    return true;
+#else
+    (void)name_off; (void)name;
+    return false;
+#endif
+}
+
+static void fill_result(RomFsEntry& out) {
+    out.name_handle = 0;
+    out.rom_offset  = s_base + s_dma.ent.offset;       // absolute cart addr
+    out.byte_length = s_dma.ent.length;
+    out.type        = s_dma.ent.type;
+    out.width       = s_dma.ent.width;
+    out.height      = s_dma.ent.height;
+    out.raw_length  = s_dma.ent.reserved[0];           // 0 = not compressed
+}
+
+// -----------------------------------------------------------------------
+// n64_romfs_find — binary search of the sorted on-ROM directory, then a
+// name check over the run of entries sharing the hash.
+// -----------------------------------------------------------------------
 const RomFsEntry* n64_romfs_find(const char* filename) {
 #ifdef N64_BUILD
     if (!s_entry_count || !filename) return nullptr;
     const u32 want = n64_romfs_hash(filename);
 
     u32 lo = 0, hi = s_entry_count;
-    while (lo < hi) {
+    while (lo < hi) {                                  // lower bound of `want`
         u32 mid = lo + (hi - lo) / 2;
         rom_read32(s_entries_addr + mid * (u32)sizeof(RomFsWireEntry));
-        const u32 h = s_dma.ent.hash;
-        if (h == want) {
-            RomFsEntry& out = s_slots[s_next_slot];
-            s_next_slot = (s_next_slot + 1) % SLOT_COUNT;
-            out.name_handle = 0;
-            out.rom_offset  = s_base + s_dma.ent.offset; // absolute cart addr
-            out.byte_length = s_dma.ent.length;
-            out.type        = s_dma.ent.type;
-            out.width       = s_dma.ent.width;
-            out.height      = s_dma.ent.height;
-            return &out;
-        }
-        if (h < want) lo = mid + 1; else hi = mid;
+        if (s_dma.ent.hash < want) lo = mid + 1; else hi = mid;
+    }
+    for (u32 i = lo; i < s_entry_count; ++i) {
+        rom_read32(s_entries_addr + i * (u32)sizeof(RomFsWireEntry));
+        if (s_dma.ent.hash != want) break;
+        RomFsWireEntry e = s_dma.ent;
+        if (!name_matches(e.name_off, filename)) continue;
+        s_dma.ent = e;
+        RomFsEntry& out = s_slots[s_next_slot];
+        s_next_slot = (s_next_slot + 1) % SLOT_COUNT;
+        fill_result(out);
+        return &out;
     }
 #else
     (void)filename;
@@ -126,6 +166,13 @@ const RomFsEntry* n64_romfs_find(const char* filename) {
 // e.g. "data/core/images/terrain/..." → "images/terrain/..."
 // -----------------------------------------------------------------------
 const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
+    // Paths from the engine's own filesystem code: "/rom/<exact ROMFS name>".
+    if (std::strncmp(wesnoth_path, "/rom/", 5) == 0)
+        return n64_romfs_find(wesnoth_path + 5);
+    // Exact ROMFS names (packer --vfs stores the repository layout).
+    if (const RomFsEntry* e = n64_romfs_find(wesnoth_path))
+        return e;
+    // Legacy layout (packer without --vfs): data/core/ and data/ stripped.
     const char* prefixes[] = { "data/core/", "data/", nullptr };
     for (const char** p = prefixes; *p; ++p) {
         size_t plen = std::strlen(*p);
@@ -148,15 +195,37 @@ const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
     return nullptr;
 }
 
+u32 n64_romfs_read_capacity(const RomFsEntry* e) {
+    if (!e) return 0;
+    u32 need = e->raw_length ? e->raw_length + (e->byte_length >> 8) + 32 + 16 : e->byte_length;
+    return (need + 15u) & ~15u;
+}
+
+#ifdef N64_BUILD
+extern "C" int decompress_lz4_full_inplace(const uint8_t* src, size_t src_size,
+                                           uint8_t* dst, size_t dst_size);  // libdragon
+#endif
+
 u32 n64_romfs_read(const RomFsEntry* e, void* dst, u32 capacity) {
     if (!e || !dst) return 0;
-    const u32 span = (e->byte_length + 15u) & ~15u;
-    if (span > capacity) return 0;
+    if (n64_romfs_read_capacity(e) > capacity) return 0;
 #ifdef N64_BUILD
-    data_cache_hit_writeback_invalidate(dst, span);
-    dma_read(dst, e->rom_offset, span);
-    data_cache_hit_invalidate(dst, span);
-    return e->byte_length;
+    const u32 span = (e->byte_length + 15u) & ~15u;
+    if (!e->raw_length) {
+        data_cache_hit_writeback_invalidate(dst, span);
+        dma_read(dst, e->rom_offset, span);
+        data_cache_hit_invalidate(dst, span);
+        return e->byte_length;
+    }
+    // LZ4: DMA the compressed block to the (16-byte aligned) tail of the
+    // buffer, then decompress in place towards the front.
+    u8* buf = static_cast<u8*>(dst);
+    u32 src_at = (capacity - span) & ~15u;
+    data_cache_hit_writeback_invalidate(buf + src_at, span);
+    dma_read(buf + src_at, e->rom_offset, span);
+    data_cache_hit_invalidate(buf + src_at, span);
+    int n = decompress_lz4_full_inplace(buf + src_at, e->byte_length, buf, e->raw_length);
+    return n == (int)e->raw_length ? e->raw_length : 0;
 #else
     return 0;
 #endif

@@ -51,6 +51,9 @@ static void print_usage(const char* prog) {
         "  --music-budget-mb <n>  Pack music, smallest tracks first, up to n MB\n"
         "  --sfx-max-ms <n>    Truncate sound effects longer than n ms (default: 1500)\n"
         "  --no-sfx            Skip sound effects\n"
+        "  --vfs               Pack the data tree for the engine's filesystem\n"
+        "                      (exact paths, raw WML/Lua, directory listings, LZ4)\n"
+        "  --compress-all      Also LZ4-compress textures and sounds\n"
         "  --english-only      Skip non-English translations\n"
         "  --verbose           Verbose output\n"
         "  --help              Show this help\n"
@@ -201,6 +204,8 @@ int main(int argc, char** argv) {
             opts.convert_music = opts.music_budget_mb > 0;
         }
         else if (std::strcmp(argv[i], "--no-sfx") == 0) { opts.sfx_max_ms = -1; }
+        else if (std::strcmp(argv[i], "--vfs") == 0) { opts.vfs = true; }
+        else if (std::strcmp(argv[i], "--compress-all") == 0) { opts.compress_all = true; }
         else if (std::strcmp(argv[i], "--sfx-max-ms") == 0 && i + 1 < argc) {
             opts.sfx_max_ms = std::max(0, std::atoi(argv[++i]));
         }
@@ -258,6 +263,11 @@ int main(int argc, char** argv) {
                     glyphs.width, glyphs.height, assets.back().data.size());
     }
 
+    if (opts.vfs) {
+        const fs::path repo_root = fs::absolute(opts.wesnoth_data_dir).parent_path();
+        pack_vfs(repo_root, opts, assets);
+        compress_entries(assets, opts.compress_all);
+    } else {
     // --- Step 2: Walk the data directory ---
     size_t img_count = 0, sfx_count = 0, mus_count = 0, wml_count = 0, lua_count = 0, map_count = 0;
     std::vector<std::pair<fs::path, std::string>> music_files;
@@ -424,6 +434,8 @@ int main(int argc, char** argv) {
     std::printf("  Lua      : %zu\n", lua_count);
     std::printf("  Maps     : %zu\n", map_count);
     std::printf("  Total    : %zu entries\n", assets.size());
+
+    } // !opts.vfs
 
     // --- Step 3: Build the ROMFS blob ---
     std::printf("\nBuilding ROM filesystem...\n");
