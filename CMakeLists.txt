@@ -33,6 +33,18 @@ if(N64_BUILD)
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_game_launcher\\.cpp$")
     # Superseded by the real src/filesystem.cpp running over n64_vfs.cpp.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_filesystem\\.cpp$")
+    # Stand-ins for engine code: built separately with every definition made
+    # weak (see wesnoth_n64_stubs below), so real engine code always wins.
+    set(N64_STUB_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_stubs.cpp
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_dialog_impls.cpp
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_stubs.cpp
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_draw_manager.cpp
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_font_text.cpp
+        ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_dialog_stubs.cpp)
+    list(REMOVE_ITEM N64_PLATFORM_SOURCES ${N64_STUB_SOURCES})
+    # Superseded by the real src/preferences/preferences.cpp (file in /save).
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_preferences\\.cpp$")
     # Superseded by the real src/events.cpp (controller input arrives as SDL events).
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_events\\.cpp$")
 
@@ -292,6 +304,7 @@ if(N64_BUILD)
         src/utils/spritesheet_generator.cpp
         src/events.cpp
         src/filesystem_sdl.cpp
+        src/preferences/preferences.cpp
         src/game_classification.cpp
         src/mp_game_settings.cpp
         src/language.cpp
@@ -783,10 +796,24 @@ if(N64_BUILD)
         -T ${CMAKE_SOURCE_DIR}/cmake/n64_paged.ld
         -L${CMAKE_BINARY_DIR}
         -Wl,--wrap=__do_global_ctors
+        -Wl,--wrap=__cxa_throw
         -Wl,--gc-sections
-        -Wl,--allow-multiple-definition
         -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64.map
     )
+
+    # N64 stand-ins for engine functionality not yet ported. Every definition
+    # is weakened after compilation, so an engine definition of the same
+    # symbol always wins and stubs only fill real gaps; adding an engine source
+    # retires its stubs automatically. (Previously the link used
+    # --allow-multiple-definition, which let stubs silently replace 96 engine
+    # functions, including gui2::init and game_config::path.)
+    add_library(wesnoth_n64_stubs STATIC ${N64_STUB_SOURCES})
+    target_include_directories(wesnoth_n64_stubs PRIVATE $<TARGET_PROPERTY:wesnoth_n64,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(wesnoth_n64_stubs PRIVATE $<TARGET_PROPERTY:wesnoth_n64,COMPILE_DEFINITIONS>)
+    target_compile_options(wesnoth_n64_stubs PRIVATE $<TARGET_PROPERTY:wesnoth_n64,COMPILE_OPTIONS> -fno-lto)
+    add_custom_command(TARGET wesnoth_n64_stubs POST_BUILD
+        COMMAND ${TOOLCHAIN_PREFIX}objcopy --weaken $<TARGET_FILE:wesnoth_n64_stubs>
+        COMMENT "Weakening N64 stand-in definitions")
 
     # Build with -Oz (aggressive size opt) + LTO to fit the 8 MiB N64 RAM
     # budget. Wesnoth refuses to compile with NDEBUG (asserts are required),
@@ -807,6 +834,7 @@ if(N64_BUILD)
     # Link libdragon + zlib (for save compression)
     target_link_libraries(wesnoth_n64 PRIVATE
         wesnoth_n64_lua
+        wesnoth_n64_stubs
         ${N64_LIBDRAGON_PAGED}
         ${N64_INST}/mips64-elf/lib/libdragonsys.a
         # zlib stubbed inline for N64 (no compression, just memcpy)

@@ -135,3 +135,13 @@ struct passwd; /* opaque */
 struct passwd* getpwuid(int uid) { (void)uid; return 0; }
 
 #endif /* N64_BUILD */
+
+/* Diagnostics: log every C++ throw with its type (linked with
+ * --wrap=__cxa_throw). Resident, because libstdc++ throws through it too. */
+#include <stdio.h>
+extern void __real___cxa_throw(void* obj, void* tinfo, void (*dest)(void*));
+void __wrap___cxa_throw(void* obj, void* tinfo, void (*dest)(void*)) {
+    const char* name = ((const char* const*)tinfo)[1];   /* std::type_info::__name */
+    fprintf(stderr, "[n64] C++ throw: %s\n", name ? name : "?");
+    __real___cxa_throw(obj, tinfo, dest);
+}

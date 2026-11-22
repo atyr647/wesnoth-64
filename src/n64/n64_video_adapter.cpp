@@ -45,6 +45,13 @@ void deinit() {
     s_initialized = false;
 }
 
+// The console has one output mode.
+std::vector<point> get_available_resolutions(bool) { return { s_resolution }; }
+bool set_resolution(const point& r) { return r == s_resolution; }
+
+// Present the frame (draw_manager calls this after rendering).
+void render_screen() { n64_video_flip(); }
+
 void update_buffers(bool) {
     // No-op on N64 (single fixed resolution)
 }

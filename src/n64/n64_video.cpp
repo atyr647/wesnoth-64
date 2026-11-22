@@ -80,7 +80,7 @@ static TexCacheEntry s_tex_cache[MAX_TEXTURES];
 static u16           s_tex_count = 0;
 
 // Backing RAM for texture data (fits inside N64_POOL_TEXTURE_CACHE = 1 MB)
-static u8 s_tex_data[N64_POOL_TEXTURE_CACHE] __attribute__((aligned(8)));
+static u8 s_tex_data[N64_POOL_TEXTURE_CACHE] __attribute__((aligned(16)));   // DMA + cache ops need 16
 static size_t s_tex_data_used = 0;
 
 // Glyph sheet texture handle (loaded once at init)

@@ -30,6 +30,10 @@
 #  include "preferences/preferences.hpp"
 #  include "serialization/schema_validator.hpp"
 
+// Code page pool for the demand pager (src/n64/pager): 16 KiB frames.
+// 160 frames = 2.5 MiB. (1 MiB was tried: gui2::init still runs out of heap.)
+extern "C" uint32_t n64_pager_frames_requested = 160;
+
 // Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
 int wesnoth_main(int argc, char** argv);
 

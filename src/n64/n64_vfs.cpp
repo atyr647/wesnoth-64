@@ -169,3 +169,16 @@ bool rename(const std::string& from_in, const std::string& to_in) {
 }
 
 } // namespace n64vfs
+
+// POSIX calls newlib does not provide, over the VFS (it has no permissions).
+#include <cerrno>
+#include <sys/types.h>
+extern "C" int chmod(const char* path, mode_t) {
+    if (n64vfs::stat(path) == n64vfs::kind::none) { errno = ENOENT; return -1; }
+    return 0;
+}
+extern "C" int chdir(const char* path) {
+    if (n64vfs::stat(path) != n64vfs::kind::dir) { errno = ENOENT; return -1; }
+    n64vfs::set_cwd(path);
+    return 0;
+}

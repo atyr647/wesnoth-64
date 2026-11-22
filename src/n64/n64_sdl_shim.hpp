@@ -994,6 +994,22 @@ inline int EVP_MD_size(const EVP_MD*) { return 16; }
 inline int EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, void*) { return 0; }
 inline int EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t) { return 0; }
 inline int EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*) { return 0; }
+// Cipher API: used only to store multiplayer server passwords (online play).
+// Every call fails, so preferences.cpp logs the error and stores nothing.
+typedef struct n64_evp_cipher_ctx EVP_CIPHER_CTX;
+typedef struct n64_evp_cipher EVP_CIPHER;
+typedef struct n64_engine ENGINE;
+inline EVP_CIPHER_CTX* EVP_CIPHER_CTX_new() { return nullptr; }
+inline void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX*) {}
+inline const EVP_CIPHER* EVP_aes_256_cbc() { return nullptr; }
+inline int EVP_EncryptInit_ex(EVP_CIPHER_CTX*, const EVP_CIPHER*, ENGINE*, const unsigned char*, const unsigned char*) { return 0; }
+inline int EVP_EncryptUpdate(EVP_CIPHER_CTX*, unsigned char*, int*, const unsigned char*, int) { return 0; }
+inline int EVP_EncryptFinal_ex(EVP_CIPHER_CTX*, unsigned char*, int*) { return 0; }
+inline int EVP_DecryptInit_ex(EVP_CIPHER_CTX*, const EVP_CIPHER*, ENGINE*, const unsigned char*, const unsigned char*) { return 0; }
+inline int EVP_DecryptUpdate(EVP_CIPHER_CTX*, unsigned char*, int*, const unsigned char*, int) { return 0; }
+inline int EVP_DecryptFinal_ex(EVP_CIPHER_CTX*, unsigned char*, int*) { return 0; }
+inline unsigned long ERR_get_error() { return 0; }
+inline char* ERR_error_string(unsigned long, char*) { static char msg[] = "no cryptography on the Nintendo 64"; return msg; }
 #endif
 
 #endif // N64_BUILD
