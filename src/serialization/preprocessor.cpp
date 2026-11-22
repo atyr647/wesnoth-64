@@ -438,7 +438,16 @@ int preprocessor_streambuf::underflow()
 
 	const int desired_fill_amount = 2000;
 
+#ifdef N64_BUILD
+	// libstdc++'s stringbuf does not advance in_avail() as text is written, so
+	// the loop below would preprocess everything into one buffer before
+	// returning (21 MB for the in-game config). Measure by the write position
+	// instead; the output is identical, only produced in smaller pieces.
+	const std::streamoff fill_start = buffer_.tellp();
+	while(current() && buffer_.tellp() - fill_start < desired_fill_amount) {
+#else
 	while(current() && buffer_.rdbuf()->in_avail() < desired_fill_amount) {
+#endif
 		// Process files and data chunks until the desired buffer size is reached
 		if(!current()->get_chunk()) {
 			// Drop the current preprocessor item from the queue.

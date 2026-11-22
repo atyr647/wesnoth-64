@@ -38,17 +38,52 @@ extern char __paged_end[];
 // Frame pool size. A target may define its own (strong) value.
 __attribute__((weak)) uint32_t n64_pager_frames_requested = 160;   // 2.5 MiB
 
-#define MAX_PAGES 4096u          // 64 MiB of paged image
+// ---------------------------------------------------------------------------
+// Regions. Page indices are global: code pages [0, s_ncode), heap pages
+// [s_ncode, s_ncode + s_nheap).
+//   code  PG_VBASE (0xC0000000)  read-only, backed by the ROM (.pgc)
+//   heap  VH_BASE  (0xD0000000)  read/write, zero on first touch, backed by
+//                               SummerCart64 SDRAM (swap) beyond the ROM
+// ---------------------------------------------------------------------------
+#define MAX_PAGES 6144u          // 96 MiB of virtual space
 #define NO_FRAME  0xFFFFu
+#define F_DIRTY   1u             // heap page modified since loaded
+#define F_SWAPPED 2u             // heap page has a copy in swap
+
+// SummerCart64 (registers as in libdragon's usb.c)
+#define SC64_REG_SR_CMD     0x1FFF0000u
+#define SC64_REG_DATA_0     0x1FFF0004u
+#define SC64_REG_DATA_1     0x1FFF0008u
+#define SC64_REG_IDENTIFIER 0x1FFF000Cu
+#define SC64_REG_KEY        0x1FFF0010u
+#define SC64_V2_IDENTIFIER  0x53437632u
+#define SC64_CMD_CONFIG_SET 'C'
+#define SC64_CFG_ROM_WRITE_ENABLE 1u
+// Swap: cartridge SDRAM from 32 MiB up to just below the IS-Viewer window.
+#define SWAP_CART_BASE      0x12000000u      /* ROM must end below 32 MiB */
+#define SWAP_CART_END       0x13FC0000u
 
 static uint16_t s_pte[MAX_PAGES];            // page -> frame (NO_FRAME if absent)
+static uint8_t  s_flags[MAX_PAGES];
 typedef struct { int32_t page; uint8_t ref; } frame_t;
 static frame_t*  s_frames;
 static uint8_t*  s_pool;                     // kseg0 address of frame 0
-static uint32_t  s_nframes, s_npages, s_rom, s_hand;
+static uint32_t  s_nframes, s_ncode, s_nheap, s_rom, s_hand;
 static n64_pager_stats_t s_stats;
 static exception_handler_t s_prev_handler;
 static int s_ready;
+
+static inline int is_heap(uint32_t page) { return page >= s_ncode; }
+static inline uint32_t page_va(uint32_t page) {
+    return is_heap(page) ? VH_BASE + (page - s_ncode) * PG_SIZE : PG_VBASE + page * PG_SIZE;
+}
+// Global page index of a virtual address, or -1.
+static inline int32_t va_page(uint32_t va) {
+    if (va >= PG_VBASE && va < PG_VBASE + s_ncode * PG_SIZE) return (int32_t)((va - PG_VBASE) >> PG_SHIFT);
+    if (va >= VH_BASE && va < VH_BASE + s_nheap * PG_SIZE) return (int32_t)(s_ncode + ((va - VH_BASE) >> PG_SHIFT));
+    return -1;
+}
+static inline uint32_t swap_addr(uint32_t page) { return SWAP_CART_BASE + (page - s_ncode) * PG_SIZE; }
 
 // ---------------------------------------------------------------------------
 // TLB helpers
@@ -69,17 +104,20 @@ static inline void tlb_wr(void)                   { asm volatile("tlbwr; nop; no
 #define PAGEMASK_16K 0x00006000u
 
 static inline uint32_t entry_lo(uint32_t page) {
-    if (page >= s_npages || s_pte[page] == NO_FRAME) return 1u;     // invalid, global
+    if (page >= s_ncode + s_nheap || s_pte[page] == NO_FRAME) return 1u;   // invalid, global
     uint32_t phys = PhysicalAddr(s_pool + (uint32_t)s_pte[page] * PG_SIZE);
-    // PFN | C=3 (cacheable, non-coherent) | D=0 (read-only) | V | G
-    return ((phys >> 12) << 6) | (3u << 3) | 2u | 1u;
+    // PFN | C=3 (cacheable, non-coherent) | D (writable: dirty heap pages only) | V | G
+    uint32_t d = (is_heap(page) && (s_flags[page] & F_DIRTY)) ? 4u : 0u;
+    return ((phys >> 12) << 6) | (3u << 3) | d | 2u | 1u;
 }
 
 // Install (or refresh) the TLB entry for the pair containing `page`.
-// If `insert` is false, only an existing entry is updated.
+// If `insert` is false, only an existing entry is updated. Pairs never straddle
+// regions: both regions start on a 32 KiB boundary and the code region has an
+// even page count.
 static void tlb_set_pair(uint32_t page, int insert) {
-    uint32_t even = page & ~1u;
-    uint32_t hi = PG_VBASE + even * PG_SIZE;                         // ASID 0
+    uint32_t even = is_heap(page) ? s_ncode + ((page - s_ncode) & ~1u) : (page & ~1u);
+    uint32_t hi = page_va(even);                                     // ASID 0
     uint32_t sr = C0_STATUS();
     C0_WRITE_STATUS(sr & ~1u);                                       // IE off while using TLB regs
     tlb_write_pagemask(PAGEMASK_16K);
@@ -108,6 +146,26 @@ static void tlb_reset(void) {
 }
 
 // ---------------------------------------------------------------------------
+// SummerCart64: unlock and enable writes to the cartridge SDRAM.
+// ---------------------------------------------------------------------------
+static void pi_wait(void) { while (*(volatile uint32_t*)0xA4600010 & 3) {} }
+static void sc64_write(uint32_t reg, uint32_t v) { pi_wait(); io_write(reg, v); pi_wait(); }
+static uint32_t sc64_read(uint32_t reg) { pi_wait(); return io_read(reg); }
+
+static int sc64_enable_sdram_writes(void) {
+    sc64_write(SC64_REG_KEY, 0);
+    sc64_write(SC64_REG_KEY, 0x5F554E4Cu);
+    sc64_write(SC64_REG_KEY, 0x4F434B5Fu);
+    if (sc64_read(SC64_REG_IDENTIFIER) != SC64_V2_IDENTIFIER) return 0;
+    sc64_write(SC64_REG_DATA_0, SC64_CFG_ROM_WRITE_ENABLE);
+    sc64_write(SC64_REG_DATA_1, 1);
+    sc64_write(SC64_REG_SR_CMD, SC64_CMD_CONFIG_SET);
+    uint32_t sr;
+    do { sr = sc64_read(SC64_REG_SR_CMD); } while (sr & (1u << 31));
+    return !(sr & (1u << 30));
+}
+
+// ---------------------------------------------------------------------------
 // Paging
 // ---------------------------------------------------------------------------
 static uint32_t pick_frame(void) {
@@ -121,21 +179,42 @@ static uint32_t pick_frame(void) {
     }
 }
 
+static void evict(uint32_t fi) {
+    frame_t* f = &s_frames[fi];
+    if (f->page < 0) return;
+    uint32_t old = (uint32_t)f->page;
+    s_pte[old] = NO_FRAME;
+    tlb_set_pair(old, 0);                        // drop the mapping if cached
+    if (is_heap(old) && (s_flags[old] & F_DIRTY)) {
+        uint8_t* src = s_pool + fi * PG_SIZE;
+        data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM
+        dma_write(src, swap_addr(old), PG_SIZE);
+        s_flags[old] = (uint8_t)((s_flags[old] & ~F_DIRTY) | F_SWAPPED);
+        ++s_stats.writebacks;
+    }
+    f->page = -1;
+    ++s_stats.evictions;
+    --s_stats.resident;
+}
+
 static void load_page(uint32_t page) {
     uint32_t fi = pick_frame();
+    evict(fi);
     frame_t* f = &s_frames[fi];
-    if (f->page >= 0) {
-        uint32_t old = (uint32_t)f->page;
-        s_pte[old] = NO_FRAME;
-        tlb_set_pair(old, 0);                    // drop the old mapping if cached
-        ++s_stats.evictions;
-        --s_stats.resident;
-    }
     uint8_t* dst = s_pool + fi * PG_SIZE;
-    data_cache_hit_writeback_invalidate(dst, PG_SIZE);
-    dma_read(dst, s_rom + page * PG_SIZE, PG_SIZE);
-    data_cache_hit_invalidate(dst, PG_SIZE);
-    inst_cache_hit_invalidate(dst, PG_SIZE);
+    if (!is_heap(page)) {
+        data_cache_hit_writeback_invalidate(dst, PG_SIZE);
+        dma_read(dst, s_rom + page * PG_SIZE, PG_SIZE);
+        data_cache_hit_invalidate(dst, PG_SIZE);
+        inst_cache_hit_invalidate(dst, PG_SIZE);
+    } else if (s_flags[page] & F_SWAPPED) {
+        data_cache_hit_writeback_invalidate(dst, PG_SIZE);
+        dma_read(dst, swap_addr(page), PG_SIZE);
+        data_cache_hit_invalidate(dst, PG_SIZE);
+        ++s_stats.swapins;
+    } else {
+        memset(dst, 0, PG_SIZE);                 // fresh heap page
+    }
     f->page = (int32_t)page;
     f->ref = 1;
     s_pte[page] = (uint16_t)fi;
@@ -143,18 +222,59 @@ static void load_page(uint32_t page) {
     ++s_stats.resident;
 }
 
+// ---------------------------------------------------------------------------
+// Thread-local storage. GCC accesses TLS with rdhwr $29 (MIPS32r2), which the
+// VR4300 lacks; like the Linux kernel, emulate it in the Reserved Instruction
+// handler. One thread: a single TLS block, thread pointer = block + 0x7000
+// (the MIPS TLS ABI's TP offset).
+// ---------------------------------------------------------------------------
+extern char __tdata_start[], __tdata_end[], __tbss_start[], __tbss_end[];
+static uint32_t s_thread_pointer;
+
+static void tls_init(void) {
+    uint32_t tdata = (uint32_t)(__tdata_end - __tdata_start);
+    uint32_t total = (uint32_t)(__tbss_end - __tdata_start);
+    if (__tbss_end < __tdata_end) total = tdata;
+    uint8_t* block = memalign(16, total ? total : 16);
+    assertf(block, "cannot allocate the TLS block");
+    memcpy(block, __tdata_start, tdata);
+    memset(block + tdata, 0, total - tdata);
+    s_thread_pointer = (uint32_t)block + 0x7000u;
+}
+
+static int emulate_rdhwr(exception_t* ex) {
+    if (ex->regs->cr & (1u << 31)) return 0;           // in a branch delay slot: not expected
+    uint32_t insn = *(volatile uint32_t*)ex->regs->epc;
+    if ((insn & 0xFFE0FFFFu) != 0x7C00E83Bu) return 0;  // rdhwr rt, $29
+    uint32_t rt = (insn >> 16) & 31;
+    if (rt) ex->regs->gpr[rt] = (uint64_t)(int64_t)(int32_t)s_thread_pointer;
+    ex->regs->epc += 4;
+    return 1;
+}
+
 static void pager_exception(exception_t* ex) {
     uint32_t code = C0_GET_CAUSE_EXC_CODE(ex->regs->cr);
-    if (code == EXCEPTION_CODE_TLB_LOAD_I_MISS || code == EXCEPTION_CODE_TLB_STORE_MISS) {
-        uint32_t va = C0_BADVADDR();
-        if (va >= PG_VBASE && va < PG_VBASE + s_npages * PG_SIZE) {
-            uint32_t page = (va - PG_VBASE) >> PG_SHIFT;
-            if (s_pte[page] == NO_FRAME) load_page(page);
-            else { s_frames[s_pte[page]].ref = 1; ++s_stats.refills; }
-            tlb_set_pair(page, 1);
+    if (code == EXCEPTION_CODE_RESERVED_INSTRUCTION && emulate_rdhwr(ex)) return;
+    if (code == EXCEPTION_CODE_TLB_LOAD_I_MISS || code == EXCEPTION_CODE_TLB_STORE_MISS ||
+        code == EXCEPTION_CODE_TLB_MODIFICATION) {
+        int32_t page = va_page(C0_BADVADDR());
+        if (page >= 0) {
+            if (code == EXCEPTION_CODE_TLB_MODIFICATION) {
+                // First write to a heap page since it was loaded: mark it dirty
+                // and remap it writable. (Writes to code/rodata are bugs.)
+                if (!is_heap((uint32_t)page) || s_pte[page] == NO_FRAME) goto unhandled;
+                s_flags[page] |= F_DIRTY;
+            } else if (s_pte[page] == NO_FRAME) {
+                load_page((uint32_t)page);
+            } else {
+                s_frames[s_pte[page]].ref = 1;
+                ++s_stats.refills;
+            }
+            tlb_set_pair((uint32_t)page, 1);
             return;                              // retry the faulting instruction
         }
     }
+unhandled:
     if (s_prev_handler) s_prev_handler(ex);
 }
 
@@ -162,28 +282,40 @@ static void pager_init(void) {
     if (s_ready) return;
     s_ready = 1;
 
-    s_npages = (uint32_t)(__paged_end - __paged_start) / PG_SIZE;
-    if (s_npages == 0) return;                    // nothing is paged in this build
-    assertf(s_npages <= MAX_PAGES, "paged image too large: %lu pages", (unsigned long)s_npages);
+    s_ncode = (uint32_t)(__paged_end - __paged_start) / PG_SIZE;
+    s_ncode = (s_ncode + 1) & ~1u;                // keep TLB pairs within the region
+    if (s_ncode) {
+        s_rom = rompak_search_ext(".pgc");
+        assertf(s_rom != 0, "pager: paged image (.pgc) missing from the ROM");
+    }
 
-    s_rom = rompak_search_ext(".pgc");
-    assertf(s_rom != 0, "pager: paged image (.pgc) missing from the ROM");
+    // The swappable heap needs a SummerCart64 with SDRAM writes enabled.
+    if (sc64_enable_sdram_writes()) {
+        s_nheap = (SWAP_CART_END - SWAP_CART_BASE) / PG_SIZE;
+        if (s_ncode + s_nheap > MAX_PAGES) s_nheap = MAX_PAGES - s_ncode;
+        s_nheap &= ~1u;
+    }
+    tls_init();
+    if (s_ncode + s_nheap == 0) { s_prev_handler = register_exception_handler(pager_exception); return; }
+    assertf(s_ncode <= MAX_PAGES, "paged image too large: %lu pages", (unsigned long)s_ncode);
 
     s_nframes = n64_pager_frames_requested;
-    if (s_nframes > s_npages) s_nframes = s_npages;
     s_pool = memalign(PG_SIZE, s_nframes * PG_SIZE);
     assertf(s_pool, "pager: cannot allocate %lu frames", (unsigned long)s_nframes);
     s_pool = (uint8_t*)CachedAddr(s_pool);
     s_frames = malloc(s_nframes * sizeof(frame_t));
     for (uint32_t i = 0; i < s_nframes; ++i) { s_frames[i].page = -1; s_frames[i].ref = 0; }
-    for (uint32_t i = 0; i < MAX_PAGES; ++i) s_pte[i] = NO_FRAME;
+    for (uint32_t i = 0; i < MAX_PAGES; ++i) { s_pte[i] = NO_FRAME; s_flags[i] = 0; }
 
-    s_stats.pages = s_npages;
+    s_stats.pages = s_ncode;
+    s_stats.heap_pages = s_nheap;
     s_stats.frames = s_nframes;
 
     tlb_reset();
     s_prev_handler = register_exception_handler(pager_exception);
 }
+
+uint32_t n64_pager_heap_size(void) { pager_init(); return s_nheap * PG_SIZE; }
 
 void n64_pager_get_stats(n64_pager_stats_t* out) { *out = s_stats; }
 

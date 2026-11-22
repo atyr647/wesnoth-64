@@ -38,8 +38,15 @@ try {
 #ifdef __ANDROID__
 	defines.try_emplace("ANDROID");
 #endif
+#ifdef N64_BUILD
+	// The schema check only logs problems, and validating the mainline GUI
+	// peaks at ~26 MB on a 32-bit target. On the console the GUI data is
+	// validated with this same schema at build time instead.
+	return io::read(*preprocess_file(path, defines));
+#else
 	schema_validation::schema_validator validator{filesystem::get_wml_location("schema/gui.cfg").value()};
 	return io::read(*preprocess_file(path, defines), &validator);
+#endif
 
 } catch(const utils::bad_optional_access&) {
 	FAIL("GUI2: schema/gui.cfg not found.");

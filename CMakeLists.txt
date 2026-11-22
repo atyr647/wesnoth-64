@@ -785,8 +785,14 @@ if(N64_BUILD)
     target_compile_definitions(wesnoth_n64 PRIVATE N64_PAGED=1)
     # Resident code must be real object code (not LTO IR), or its sections
     # would not carry the file names cmake/n64_paged.ld selects on.
+    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp)
     set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
+        src/n64/pager/n64_vheap.cpp
         PROPERTIES COMPILE_OPTIONS "-fno-lto")
+    # Lua's default allocator (luaL_newstate -> l_alloc in lauxlib.c) uses the
+    # swappable heap too.
+    set_source_files_properties(src/modules/lua/lauxlib.c PROPERTIES
+        COMPILE_DEFINITIONS "realloc=n64_vrealloc;free=n64_vfree")
     # Wesnoth's own main() is entered from src/n64/n64_main.cpp after platform
     # initialisation; rename it so it does not collide with the entry point.
     set_source_files_properties(src/wesnoth.cpp PROPERTIES COMPILE_DEFINITIONS "main=wesnoth_main")

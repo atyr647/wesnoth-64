@@ -46,6 +46,7 @@ SECTIONS {
         *crt*.o(.text .text.*)
         *n64_pager.c.obj(.text .text.*)
         *n64_libgcc.c.obj(.text .text.*)
+        *n64_vheap.cpp.obj(.text .text.*)
         /* libstdc++'s weak template functions, wherever they were emitted
            (generated into the build directory by CMakeLists.txt) */
         INCLUDE n64_resident_weak.ld
@@ -70,6 +71,7 @@ SECTIONS {
         *crt*.o(.rdata .rodata .rodata.*)
         *n64_pager.c.obj(.rdata .rodata .rodata.*)
         *n64_libgcc.c.obj(.rdata .rodata .rodata.*)
+        *n64_vheap.cpp.obj(.rdata .rodata .rodata.*)
         KEEP(*(keep.rodata.*))
         . = ALIGN(8);
     } :main
@@ -98,6 +100,20 @@ SECTIONS {
         KEEP(*(keep.data.*))
         *(.gnu.linkonce.d.*)
         . = ALIGN(8);
+    } :main
+
+    /* Thread-local storage template. libdragon has no TLS runtime; the pager
+       sets up one TLS block at boot and emulates rdhwr $29 (see n64_pager.c). */
+    .tdata : {
+        __tdata_start = .;
+        *(.tdata .tdata.* .gnu.linkonce.td.*)
+        __tdata_end = .;
+    } :main
+    .tbss : {
+        __tbss_start = .;
+        *(.tbss .tbss.* .gnu.linkonce.tb.*)
+        *(.tcommon)
+        __tbss_end = .;
     } :main
 
     .sdata : {

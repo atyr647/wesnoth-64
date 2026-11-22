@@ -26,6 +26,7 @@ extern "C" {
 #define PG_VBASE   0xC0000000u
 #define PG_SHIFT   14u
 #define PG_SIZE    (1u << PG_SHIFT)
+#define VH_BASE    0xD0000000u      // swappable heap (SummerCart64 only)
 
 typedef struct {
     uint32_t pages;          // pages in the paged image
@@ -34,9 +35,15 @@ typedef struct {
     uint32_t faults;         // page loads from ROM
     uint32_t refills;        // TLB refills of already-resident pages
     uint32_t evictions;
+    uint32_t heap_pages;     // swappable heap size in pages (0 without SC64)
+    uint32_t writebacks;     // dirty heap pages written to swap
+    uint32_t swapins;        // heap pages read back from swap
 } n64_pager_stats_t;
 
 void n64_pager_get_stats(n64_pager_stats_t* out);
+
+// Size in bytes of the swappable heap at VH_BASE (0 if not available).
+uint32_t n64_pager_heap_size(void);
 
 #ifdef __cplusplus
 }
