@@ -2,7 +2,7 @@
  * main.cpp — Wesnoth N64 Asset Pipeline
  *
  * Usage:
- *   wesnoth-n64-pack [options] <wesnoth_data_dir> <output.n64>
+ *   wesnoth-n64-pack [options] <wesnoth_data_dir> <output.wnrf>
  *
  * Options:
  *   --campaign <name>    Include only this campaign (e.g. "Heir_To_The_Throne")
@@ -40,7 +40,7 @@ using namespace n64pack;
 // -----------------------------------------------------------------------
 static void print_usage(const char* prog) {
     std::printf(
-        "Usage: %s [options] <wesnoth_data_dir> <output.n64>\n"
+        "Usage: %s [options] <wesnoth_data_dir> <output.wnrf>\n"
         "\n"
         "Options:\n"
         "  --campaign <name>   Include only this campaign\n"
@@ -52,8 +52,8 @@ static void print_usage(const char* prog) {
         "  --help              Show this help\n"
         "\n"
         "Examples:\n"
-        "  %s --campaign Heir_To_The_Throne data/ wesnoth.n64\n"
-        "  %s --all-campaigns --no-music data/ wesnoth_full.n64\n",
+        "  %s --campaign Heir_To_The_Throne data/ wesnoth.wnrf\n"
+        "  %s --all-campaigns --no-music data/ wesnoth_full.wnrf\n",
         prog, prog, prog
     );
 }
@@ -93,6 +93,18 @@ static std::string romfs_name(const fs::path& full_path,
     if (rel_str.rfind(prefix, 0) == 0)
         rel_str = rel_str.substr(std::strlen(prefix));
     return rel_str;
+}
+
+// The N64 CPU is big-endian; pixel and PCM words must be stored that way.
+static void append_be16(std::vector<uint8_t>& out, const uint16_t* px, size_t count) {
+    out.resize(count * 2);
+    for (size_t i = 0; i < count; ++i) {
+        out[i * 2]     = uint8_t(px[i] >> 8);
+        out[i * 2 + 1] = uint8_t(px[i]);
+    }
+}
+static void swap_pairs(std::vector<uint8_t>& d) {   // LE s16 PCM -> BE
+    for (size_t i = 0; i + 1 < d.size(); i += 2) std::swap(d[i], d[i + 1]);
 }
 
 // -----------------------------------------------------------------------
@@ -162,14 +174,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Data directory not found: %s\n", opts.wesnoth_data_dir.c_str());
         return 1;
     }
-    if (!fs::exists(input_rom_path)) {
-        std::fprintf(stderr, "ROM file not found: %s\n", input_rom_path.c_str());
-        return 1;
-    }
 
     std::printf("=== Wesnoth N64 Asset Pipeline ===\n");
     std::printf("Data dir  : %s\n", opts.wesnoth_data_dir.c_str());
-    std::printf("ROM       : %s\n", input_rom_path.c_str());
+    std::printf("Output    : %s\n", input_rom_path.c_str());
     std::printf("Campaign  : %s\n", opts.campaign.empty() ? "(all)" : opts.campaign.c_str());
     std::printf("Scale     : 1/%d\n", opts.texture_scale);
     std::printf("Music     : %s\n", opts.convert_music ? "ADPCM" : "skipped");
@@ -186,8 +194,7 @@ int main(int argc, char** argv) {
         e.type   = ASSET_FONT;
         e.width  = glyphs.width;
         e.height = glyphs.height;
-        e.data.resize(glyphs.pixels.size() * 2);
-        std::memcpy(e.data.data(), glyphs.pixels.data(), e.data.size());
+        append_be16(e.data, glyphs.pixels.data(), glyphs.pixels.size());
         assets.push_back(std::move(e));
         std::printf("       glyph sheet %ux%u (%zu bytes)\n",
                     glyphs.width, glyphs.height, assets.back().data.size());
@@ -228,8 +235,7 @@ int main(int argc, char** argv) {
             entry.type   = ASSET_TEXTURE;
             entry.width  = tex.width;
             entry.height = tex.height;
-            entry.data.resize(tex.pixels.size() * 2);
-            std::memcpy(entry.data.data(), tex.pixels.data(), entry.data.size());
+            append_be16(entry.data, tex.pixels.data(), tex.pixels.size());
             if (opts.verbose)
                 std::printf("[img ] %s (%ux%u, %zu B)\n", rom_name.c_str(),
                             tex.width, tex.height, entry.data.size());
@@ -239,6 +245,7 @@ int main(int argc, char** argv) {
             entry.type = ASSET_SFX;
             entry.data = convert_sfx(p);
             if (entry.data.empty()) continue;
+            swap_pairs(entry.data);
             if (opts.verbose)
                 std::printf("[sfx ] %s (%zu B)\n", rom_name.c_str(), entry.data.size());
             ++sfx_count;
@@ -283,28 +290,17 @@ int main(int argc, char** argv) {
     std::printf("  Lua      : %zu\n", lua_count);
     std::printf("  Total    : %zu entries\n", assets.size());
 
-    // --- Step 3: Load ROM, build ROMFS, patch ---
-    std::printf("\nLoading ROM image...\n");
-    std::vector<uint8_t> rom = load_rom(input_rom_path);
-    if (rom.empty()) return 1;
-
-    std::printf("Building ROM filesystem...\n");
-    if (!build_romfs(assets, opts, rom)) {
+    // --- Step 3: Build the ROMFS blob ---
+    std::printf("\nBuilding ROM filesystem...\n");
+    std::vector<uint8_t> blob;
+    if (!build_romfs(assets, blob)) {
         std::fprintf(stderr, "ROMFS build failed.\n");
         return 1;
     }
-
-    std::printf("Writing ROM: %s (%zu MB)\n",
-                opts.output_rom.c_str(), rom.size() / 1024 / 1024);
-    if (!write_rom(opts.output_rom, rom)) return 1;
-
-    // --- Step 4: Write resolved ROM offsets source file ---
-    fs::path offsets_cpp = fs::path("src/n64/n64_romfs_offsets.cpp");
-    std::printf("Writing %s...\n", offsets_cpp.c_str());
-    if (!write_romfs_offsets(assets, offsets_cpp)) {
-        std::fprintf(stderr, "Warning: could not write ROM offsets file.\n");
-    }
-
-    std::printf("\nDone. ROM ready: %s\n", opts.output_rom.c_str());
+    if (!write_rom(opts.output_rom, blob)) return 1;
+    std::printf("\nDone. Wrote %s (%.2f MB)\n"
+                "Append it to the ROM with: n64tool ... --align 256 %s\n",
+                opts.output_rom.c_str(), blob.size() / 1048576.0,
+                opts.output_rom.c_str());
     return 0;
 }

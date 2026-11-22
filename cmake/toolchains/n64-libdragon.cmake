@@ -70,8 +70,16 @@ set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 #   1. n64sym         — extract symbol table for backtraces
 #   2. mips-strip     — produce a stripped copy of the ELF
 #   3. n64elfcompress — LZ4-compress the stripped ELF (in-place)
-#   4. n64tool        — wrap into a .z64 ROM with libdragon's IPL3 boot
+#   4. n64tool        — wrap into a .z64 ROM with libdragon's IPL3 boot,
+#                       appending the ROMFS blob (if given) before the symbols
 function(n64_create_rom target)
+    # Optional second argument: ROMFS blob (wesnoth.wnrf) built by
+    # tools/n64-asset-pipeline. n64tool names TOC entries after the file's
+    # basename and the runtime finds it with rompak_search_ext(".wnrf").
+    set(ROMFS_ARGS "")
+    if(ARGC GREATER 1 AND EXISTS "${ARGV1}")
+        set(ROMFS_ARGS --align 256 "${ARGV1}")
+    endif()
     set(ELF_FILE   "$<TARGET_FILE:${target}>")
     set(ELF_DIR    "$<TARGET_FILE_DIR:${target}>")
     set(SYM_FILE   "${ELF_DIR}/${target}.elf.sym")
@@ -91,6 +99,7 @@ function(n64_create_rom target)
                 --toc
                 --output ${ROM_FILE}
                 --align 256 ${STRIPPED}
+                ${ROMFS_ARGS}
                 --align 8   ${SYM_FILE}
         COMMENT "Creating N64 ROM: ${target}.z64"
         VERBATIM

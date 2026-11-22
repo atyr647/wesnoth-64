@@ -1,9 +1,9 @@
 /**
  * n64_romfs.cpp
  *
- * ROM filesystem implementation.
- * Loads the directory from the ROM cartridge into RAM at startup,
- * then provides O(n) lookup by interned name handle.
+ * ROM filesystem runtime. The directory lives in ROM (see n64_romfs.hpp for
+ * the wire format); lookups binary-search it by FNV-1a name hash using small
+ * DMA reads, so there is no RAM-resident table and no entry-count limit.
  */
 
 #include "n64_romfs.hpp"
@@ -12,71 +12,76 @@
 #ifdef N64_BUILD
 #  include <n64sys.h>
 #  include <dma.h>
+extern "C" uint32_t rompak_search_ext(const char* ext); // libdragon rompak.c
 #endif
 
 // -----------------------------------------------------------------------
-// In-RAM directory
+// State
 // -----------------------------------------------------------------------
-static constexpr u16 MAX_ENTRIES = 1024; // max assets in one ROM
+static u32 s_base          = 0;   // absolute cart address of the .wnrf blob
+static u32 s_entries_addr  = 0;   // absolute cart address of entry[0]
+static u32 s_entry_count   = 0;
 
-static RomFsEntry s_entries[MAX_ENTRIES];
-static u16        s_entry_count = 0;
+// Resolved at init from font/glyph_sheet.tex (absolute cart address).
+u32 ROMFS_GLYPH_SHEET_OFFSET = 0;
+u16 ROMFS_GLYPH_SHEET_W      = 128;
+u16 ROMFS_GLYPH_SHEET_H      = 128;
 
-// Loaded string table (from ROM, interned into g_strings)
-static u8         s_string_buf[16 * 1024] __attribute__((aligned(4)));
+// Results are handed out from a small rotating pool, so a caller can hold a
+// few entries at once (e.g. a texture and its atlas) without a RAM table.
+static constexpr unsigned SLOT_COUNT = 8;
+static RomFsEntry s_slots[SLOT_COUNT];
+static unsigned   s_next_slot = 0;
 
-// Stub constants — overridden by generated n64_romfs_offsets.cpp
-// from the asset pipeline. These are zero until a real ROM is built.
-const u32 ROMFS_GLYPH_SHEET_OFFSET = 0;
-const u16 ROMFS_GLYPH_SHEET_W      = 128;
-const u16 ROMFS_GLYPH_SHEET_H      = 128;
+#ifdef N64_BUILD
+// One cache-line-aligned bounce buffer for directory DMA.
+static union {
+    RomFsHeader    hdr;
+    RomFsWireEntry ent;
+    u8             raw[32];
+} s_dma __attribute__((aligned(16)));
+
+static void rom_read32(u32 cart_addr) {
+    data_cache_hit_writeback_invalidate(&s_dma, sizeof(s_dma));
+    dma_read(&s_dma, cart_addr, sizeof(s_dma));
+    data_cache_hit_invalidate(&s_dma, sizeof(s_dma));
+}
+#endif
 
 // -----------------------------------------------------------------------
 // n64_romfs_init
 // -----------------------------------------------------------------------
 bool n64_romfs_init() {
 #ifdef N64_BUILD
-    // DMA the ROMFS header
-    RomFsHeader hdr;
-    data_cache_hit_writeback_invalidate(&hdr, sizeof(hdr));
-    dma_read(&hdr, ROMFS_DIR_ROM_ADDR, sizeof(hdr));
-
-    if (hdr.magic != ROMFS_MAGIC) {
-        N64_LOG("ROMFS: bad magic %08X (expected %08X)", hdr.magic, ROMFS_MAGIC);
-        return false;
-    }
-    if (hdr.entry_count > MAX_ENTRIES) {
-        N64_LOG("ROMFS: entry_count %u exceeds MAX_ENTRIES %u",
-                hdr.entry_count, MAX_ENTRIES);
+    s_base = rompak_search_ext(".wnrf");
+    if (!s_base) {
+        N64_LOG("ROMFS: no .wnrf file in ROM table of contents");
         return false;
     }
 
-    // Load string table into s_string_buf, then intern all strings
-    N64_ASSERT(hdr.string_data_size <= sizeof(s_string_buf));
-    data_cache_hit_writeback_invalidate(s_string_buf, hdr.string_data_size);
-    dma_read(s_string_buf, hdr.string_data_offset, hdr.string_data_size);
+    rom_read32(s_base);
+    if (s_dma.hdr.magic != ROMFS_MAGIC) {
+        N64_LOG("ROMFS: bad magic %08lX at %08lX (expected %08lX)",
+                (unsigned long)s_dma.hdr.magic, (unsigned long)s_base,
+                (unsigned long)ROMFS_MAGIC);
+        return false;
+    }
+    s_entry_count  = s_dma.hdr.entry_count;
+    s_entries_addr = s_base + s_dma.hdr.entries_off;
 
-    // Load entry table (immediately after RomFsHeader in ROM)
-    u32 entries_addr = ROMFS_DIR_ROM_ADDR + sizeof(RomFsHeader);
-    size_t entries_bytes = hdr.entry_count * sizeof(RomFsEntry);
-    data_cache_hit_writeback_invalidate(s_entries, entries_bytes);
-    dma_read(s_entries, entries_addr, entries_bytes);
-
-    s_entry_count = hdr.entry_count;
-
-    // Re-intern string handles: the packed ROM string table uses offsets;
-    // convert them to handles in our runtime g_strings table.
-    const char* str_base = reinterpret_cast<const char*>(s_string_buf);
-    for (u16 i = 0; i < s_entry_count; ++i) {
-        // name_handle in ROM stores the byte offset into the packed string table
-        u32 str_off = s_entries[i].name_handle; // temporarily holds offset
-        const char* name = str_base + str_off;
-        s_entries[i].name_handle = g_strings.intern(name);
+    const RomFsEntry* glyphs = n64_romfs_find("font/glyph_sheet.tex");
+    if (glyphs) {
+        ROMFS_GLYPH_SHEET_OFFSET = glyphs->rom_offset;
+        ROMFS_GLYPH_SHEET_W      = glyphs->width;
+        ROMFS_GLYPH_SHEET_H      = glyphs->height;
+    } else {
+        N64_LOG("ROMFS: font/glyph_sheet.tex missing");
+        return false;
     }
 
-    N64_LOG("ROMFS: loaded %u entries", s_entry_count);
+    N64_LOG("ROMFS: %u entries at cart %08lX", (unsigned)s_entry_count,
+            (unsigned long)s_base);
 #else
-    // Host stub: empty filesystem
     s_entry_count = 0;
     N64_LOG("ROMFS: host stub (no ROM), 0 entries");
 #endif
@@ -84,14 +89,34 @@ bool n64_romfs_init() {
 }
 
 // -----------------------------------------------------------------------
-// n64_romfs_find
+// n64_romfs_find — binary search of the sorted on-ROM directory
 // -----------------------------------------------------------------------
 const RomFsEntry* n64_romfs_find(const char* filename) {
-    u16 handle = g_strings.intern(filename);
-    for (u16 i = 0; i < s_entry_count; ++i) {
-        if (s_entries[i].name_handle == handle)
-            return &s_entries[i];
+#ifdef N64_BUILD
+    if (!s_entry_count || !filename) return nullptr;
+    const u32 want = n64_romfs_hash(filename);
+
+    u32 lo = 0, hi = s_entry_count;
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2;
+        rom_read32(s_entries_addr + mid * (u32)sizeof(RomFsWireEntry));
+        const u32 h = s_dma.ent.hash;
+        if (h == want) {
+            RomFsEntry& out = s_slots[s_next_slot];
+            s_next_slot = (s_next_slot + 1) % SLOT_COUNT;
+            out.name_handle = 0;
+            out.rom_offset  = s_base + s_dma.ent.offset; // absolute cart addr
+            out.byte_length = s_dma.ent.length;
+            out.type        = s_dma.ent.type;
+            out.width       = s_dma.ent.width;
+            out.height      = s_dma.ent.height;
+            return &out;
+        }
+        if (h < want) lo = mid + 1; else hi = mid;
     }
+#else
+    (void)filename;
+#endif
     return nullptr;
 }
 
@@ -101,7 +126,6 @@ const RomFsEntry* n64_romfs_find(const char* filename) {
 // e.g. "data/core/images/terrain/..." → "images/terrain/..."
 // -----------------------------------------------------------------------
 const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
-    // Strip "data/core/" prefix if present
     const char* prefixes[] = { "data/core/", "data/", nullptr };
     for (const char** p = prefixes; *p; ++p) {
         size_t plen = std::strlen(*p);
@@ -111,7 +135,4 @@ const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
     return n64_romfs_find(wesnoth_path);
 }
 
-// -----------------------------------------------------------------------
-// n64_romfs_entry_count
-// -----------------------------------------------------------------------
-u16 n64_romfs_entry_count() { return s_entry_count; }
+u16 n64_romfs_entry_count() { return (u16)s_entry_count; }

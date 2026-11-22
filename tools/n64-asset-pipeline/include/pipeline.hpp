@@ -54,7 +54,7 @@ struct Texture16 {
 // -----------------------------------------------------------------------
 struct PipelineOptions {
     std::filesystem::path wesnoth_data_dir;  // input: Wesnoth data/
-    std::filesystem::path output_rom;         // output: .n64 file to patch
+    std::filesystem::path output_rom;         // output: ROMFS blob (.wnrf)
     std::string           campaign;           // which campaign to include
     bool                  all_campaigns;      // include all campaigns
     bool                  verbose;
@@ -104,19 +104,12 @@ Texture16 build_glyph_sheet(const std::filesystem::path& ttf_path = {});
 std::vector<uint8_t> compile_lua(const std::filesystem::path& lua_path);
 
 // romfs_builder.cpp
-// Given a list of assets, build:
-//   1. The packed string table
-//   2. The RomFsHeader + RomFsEntry array
-//   3. A contiguous blob of all asset data
-// And patch them into the ROM image at ROMFS_DIR_ROM_ADDR.
+// Pack all assets into the standalone big-endian ROMFS blob (wesnoth.wnrf)
+// described in src/n64/n64_romfs.hpp. Fails on name-hash collisions.
 bool build_romfs(const std::vector<AssetEntry>& assets,
-                 const PipelineOptions& opts,
-                 std::vector<uint8_t>& rom_image_inout);
+                 std::vector<uint8_t>& blob_out);
 
-// n64_romfs_offsets generator
-// Writes src/n64/n64_romfs_offsets.cpp with the glyph sheet ROM offset
-// and other well-known offsets resolved after romfs_builder runs.
-bool write_romfs_offsets(const std::vector<AssetEntry>& assets,
-                         const std::filesystem::path& output_cpp);
+// FNV-1a 32-bit; must match n64_romfs_hash() in the runtime.
+uint32_t romfs_hash(const std::string& s);
 
 } // namespace n64pack

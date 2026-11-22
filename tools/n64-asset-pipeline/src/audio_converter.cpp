@@ -32,66 +32,77 @@ static constexpr int TARGET_RATE = 22050;
 // -----------------------------------------------------------------------
 // WAV decoder (handles PCM WAV only)
 // -----------------------------------------------------------------------
-struct WavHeader {
-    char     riff[4];
-    uint32_t chunk_size;
-    char     wave[4];
-    char     fmt[4];
-    uint32_t fmt_size;
-    uint16_t audio_format;  // 1 = PCM
-    uint16_t channels;
-    uint32_t sample_rate;
-    uint32_t byte_rate;
-    uint16_t block_align;
-    uint16_t bits_per_sample;
-};
+static uint32_t rd_u32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
+static uint16_t rd_u16(const uint8_t* p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 
 static std::vector<int16_t> decode_wav(const std::filesystem::path& path) {
     FILE* fp = std::fopen(path.c_str(), "rb");
     if (!fp) return {};
-
-    WavHeader hdr;
-    if (std::fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr)) { std::fclose(fp); return {}; }
-    if (std::memcmp(hdr.riff, "RIFF", 4) || std::memcmp(hdr.wave, "WAVE", 4)) {
-        std::fclose(fp); return {};
+    std::vector<uint8_t> file;
+    {
+        uint8_t buf[65536];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), fp)) > 0) file.insert(file.end(), buf, buf + n);
     }
-    if (hdr.audio_format != 1) { // Not PCM
-        std::fprintf(stderr, "  WAV: non-PCM format %u, skipping %s\n",
-                     hdr.audio_format, path.c_str());
-        std::fclose(fp); return {};
-    }
+    std::fclose(fp);
 
-    // Find data chunk
-    char chunk_id[4];
-    uint32_t chunk_sz;
-    while (std::fread(chunk_id, 1, 4, fp) == 4 && std::fread(&chunk_sz, 4, 1, fp) == 1) {
-        if (std::memcmp(chunk_id, "data", 4) == 0) break;
-        std::fseek(fp, chunk_sz, SEEK_CUR);
-    }
+    if (file.size() < 12 || std::memcmp(file.data(), "RIFF", 4) || std::memcmp(file.data() + 8, "WAVE", 4))
+        return {};
 
-    size_t sample_count = chunk_sz / (hdr.bits_per_sample / 8) / hdr.channels;
-    std::vector<int16_t> out(sample_count);
+    uint16_t audio_format = 0, channels = 0, bits = 0;
+    uint32_t sample_rate = 0;
+    const uint8_t* data = nullptr;
+    size_t data_len = 0;
 
-    for (size_t i = 0; i < sample_count; ++i) {
-        int32_t sample = 0;
-        // Mix all channels down to mono
-        for (int c = 0; c < hdr.channels; ++c) {
-            int32_t s = 0;
-            if (hdr.bits_per_sample == 8) {
-                uint8_t b; std::fread(&b, 1, 1, fp);
-                s = (b - 128) * 256;
-            } else if (hdr.bits_per_sample == 16) {
-                int16_t b; std::fread(&b, 2, 1, fp);
-                s = b;
-            }
-            sample += s;
+    // Walk the RIFF chunks (fmt may be 16, 18 or 40 bytes; chunks are word padded).
+    size_t pos = 12;
+    while (pos + 8 <= file.size()) {
+        const uint8_t* ck = file.data() + pos;
+        size_t sz = rd_u32(ck + 4);
+        size_t body = pos + 8;
+        size_t avail = file.size() - body;
+        if (std::memcmp(ck, "fmt ", 4) == 0 && sz >= 16 && avail >= 16) {
+            audio_format = rd_u16(file.data() + body);
+            channels     = rd_u16(file.data() + body + 2);
+            sample_rate  = rd_u32(file.data() + body + 4);
+            bits         = rd_u16(file.data() + body + 14);
+            if (audio_format == 0xFFFE && sz >= 26 && avail >= 26)   // WAVE_FORMAT_EXTENSIBLE
+                audio_format = rd_u16(file.data() + body + 24);
+        } else if (std::memcmp(ck, "data", 4) == 0) {
+            data = file.data() + body;
+            data_len = std::min(sz, avail);   // tolerate bogus/streaming sizes
+            break;
         }
-        out[i] = (int16_t)std::max(-32768, std::min(32767, sample / (int)hdr.channels));
+        if (sz > avail) break;
+        pos = body + sz + (sz & 1);
+    }
+
+    if (!data) return {};
+    if (audio_format != 1) {
+        std::fprintf(stderr, "  WAV: non-PCM format %u, skipping %s\n", audio_format, path.c_str());
+        return {};
+    }
+    if (channels == 0 || sample_rate == 0 || (bits != 8 && bits != 16)) {
+        std::fprintf(stderr, "  WAV: unsupported layout (ch=%u bits=%u rate=%u), skipping %s\n",
+                     channels, bits, sample_rate, path.c_str());
+        return {};
+    }
+
+    const size_t frame = (size_t)channels * (bits / 8);
+    const size_t sample_count = data_len / frame;
+    std::vector<int16_t> out(sample_count);
+    for (size_t i = 0; i < sample_count; ++i) {
+        int32_t sum = 0;
+        for (int c = 0; c < channels; ++c) {
+            const uint8_t* q = data + i * frame + (size_t)c * (bits / 8);
+            sum += (bits == 8) ? (int32_t)(q[0] - 128) * 256 : (int32_t)(int16_t)rd_u16(q);
+        }
+        out[i] = (int16_t)std::max(-32768, std::min(32767, sum / (int)channels));
     }
 
     // Resample if needed (simple linear interpolation)
-    if ((int)hdr.sample_rate != TARGET_RATE) {
-        double ratio = (double)hdr.sample_rate / TARGET_RATE;
+    if ((int)sample_rate != TARGET_RATE) {
+        double ratio = (double)sample_rate / TARGET_RATE;
         size_t new_count = (size_t)(sample_count / ratio);
         std::vector<int16_t> resampled(new_count);
         for (size_t i = 0; i < new_count; ++i) {
@@ -104,8 +115,6 @@ static std::vector<int16_t> decode_wav(const std::filesystem::path& path) {
         }
         out = std::move(resampled);
     }
-
-    std::fclose(fp);
     return out;
 }
 

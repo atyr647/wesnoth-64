@@ -80,9 +80,9 @@ static N64TexHandle s_glyph_sheet = N64_TEX_INVALID;
 
 // ROM offset for the glyph sheet baked by the asset pipeline
 // (Defined in n64_romfs.hpp, resolved at link time)
-extern const u32 ROMFS_GLYPH_SHEET_OFFSET;
-extern const u16 ROMFS_GLYPH_SHEET_W;
-extern const u16 ROMFS_GLYPH_SHEET_H;
+extern u32 ROMFS_GLYPH_SHEET_OFFSET;
+extern u16 ROMFS_GLYPH_SHEET_W;
+extern u16 ROMFS_GLYPH_SHEET_H;
 
 // -----------------------------------------------------------------------
 // Framebuffer

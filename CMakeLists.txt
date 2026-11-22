@@ -680,7 +680,10 @@ if(N64_BUILD)
         m c gcc
     )
 
-    n64_create_rom(wesnoth_n64)
+    # ROMFS blob built by tools/n64-asset-pipeline (see tools/n64-build-romfs.sh).
+    # Without it the ROM still builds, but n64_romfs_init() fails at boot.
+    set(WESNOTH_N64_ROMFS "" CACHE FILEPATH "Path to wesnoth.wnrf to append to the ROM")
+    n64_create_rom(wesnoth_n64 "${WESNOTH_N64_ROMFS}")
 
     # Asset pipeline tool (host-side, always built with the host compiler)
     # add_subdirectory(tools/n64-asset-pipeline)
