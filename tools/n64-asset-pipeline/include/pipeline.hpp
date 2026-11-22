@@ -60,6 +60,8 @@ struct PipelineOptions {
     bool                  verbose;
     int                   texture_scale;      // 1=full, 4=quarter (N64 default)
     bool                  convert_music;      // true = ADPCM, false = skip music
+    int                   music_budget_mb;    // 0 = no music; else pack smallest tracks first up to this size
+    int                   sfx_max_ms;         // truncate (with fade-out) sound effects longer than this
     bool                  english_only;       // skip non-English translations
 };
 
@@ -85,7 +87,7 @@ inline int n64_tex_size(int original, int scale) {
 // audio_converter.cpp
 // Convert OGG/WAV to raw signed-16-bit PCM mono at 22050 Hz.
 // For music tracks, returns ADPCM-compressed data.
-std::vector<uint8_t> convert_sfx  (const std::filesystem::path& path);
+std::vector<uint8_t> convert_sfx  (const std::filesystem::path& path, int max_ms = 0);
 std::vector<uint8_t> convert_music(const std::filesystem::path& path);
 
 // wml_compiler.cpp

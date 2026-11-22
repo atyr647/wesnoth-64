@@ -71,7 +71,7 @@ void n64_combat_strike(s16 atk_x, s16 atk_y, s16 def_x, s16 def_y,
 
     // Play hit or miss sound
     if (hit) {
-        const RomFsEntry* sfx = n64_romfs_find("sounds/sword-1.pcm");
+        const RomFsEntry* sfx = n64_romfs_find("sounds/sword-1.ogg");
         if (sfx) {
             N64SfxHandle h = n64_sfx_load(sfx->rom_offset, sfx->byte_length);
             n64_sfx_play(CHAN_FX0, h, 220, 0);
@@ -137,7 +137,7 @@ void n64_combat_strike(s16 atk_x, s16 atk_y, s16 def_x, s16 def_y,
 // Death animation — fade unit out
 // -----------------------------------------------------------------------
 void n64_combat_death(s16 unit_x, s16 unit_y) {
-    const RomFsEntry* sfx = n64_romfs_find("sounds/human-die-1.pcm");
+    const RomFsEntry* sfx = n64_romfs_find("sounds/human-die-1.ogg");
     if (sfx) {
         N64SfxHandle h = n64_sfx_load(sfx->rom_offset, sfx->byte_length);
         n64_sfx_play(CHAN_FX1, h, 220, 0);
@@ -166,7 +166,7 @@ void n64_combat_death(s16 unit_x, s16 unit_y) {
 // Level-up animation — flash gold
 // -----------------------------------------------------------------------
 void n64_combat_levelup(s16 unit_x, s16 unit_y, const char* new_type) {
-    const RomFsEntry* sfx = n64_romfs_find("sounds/levelup.pcm");
+    const RomFsEntry* sfx = n64_romfs_find("sounds/heal.wav");
     if (sfx) {
         N64SfxHandle h = n64_sfx_load(sfx->rom_offset, sfx->byte_length);
         n64_sfx_play(CHAN_FX1, h, 220, 0);

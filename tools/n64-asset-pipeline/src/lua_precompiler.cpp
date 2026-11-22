@@ -1,15 +1,20 @@
 /**
  * lua_precompiler.cpp
  *
- * Pre-compiles Wesnoth Lua scripts to Lua 5.4 bytecode using luac.
+ * Lua scripts are shipped to the ROM as SOURCE TEXT, not bytecode.
  *
- * Pre-compiled bytecode:
- *   - Loads faster on N64 (skips tokenization/parsing at runtime)
- *   - Is portable across identical Lua versions
- *   - Saves ~30-50% RAM vs source text for large scripts
+ * Lua bytecode is not portable across targets: lundump.c's checkHeader()
+ * verifies sizeof(Instruction), sizeof(lua_Integer), sizeof(lua_Number) and
+ * then loads a native-endian integer (LUAC_INT) and double (LUAC_NUM) to
+ * detect byte order. A luac running on an x86-64 build host emits
+ * little-endian, 64-bit-integer chunks, which the big-endian N64 runtime
+ * rejects with "bad binary format". There is no cross-endian luac, so the
+ * N64's embedded Lua compiles the source at load time instead.
  *
- * luac must be in PATH or pointed to by LUAC_PATH environment variable.
- * It must match the Lua version embedded in Wesnoth (5.4.x).
+ * What a host luac IS good for is catching broken scripts at pack time: if
+ * luac5.4 is available every script is syntax-checked with `luac -p`, and a
+ * failure is reported (the file is still packed, as the on-target parser is
+ * the authority).
  */
 
 #include "pipeline.hpp"
@@ -17,121 +22,68 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <vector>
 #include <string>
+#include <vector>
 
-#ifdef _WIN32
-#  define POPEN  _popen
-#  define PCLOSE _pclose
-#else
-#  include <unistd.h>
-#  include <sys/stat.h>
-#  define POPEN  popen
-#  define PCLOSE pclose
+#ifndef _WIN32
+#  include <sys/wait.h>
 #endif
 
 namespace n64pack {
 
-// -----------------------------------------------------------------------
-// Find luac executable
-// -----------------------------------------------------------------------
 static std::string find_luac() {
     const char* env = std::getenv("LUAC_PATH");
     if (env && *env) return env;
-
-    // Try common locations
-    const char* candidates[] = {
-        "luac5.4", "luac54", "luac",
-        "/usr/bin/luac5.4", "/usr/local/bin/luac5.4",
-        nullptr
-    };
-    for (const char** c = candidates; *c; ++c) {
-        // Check if it exists and is executable
-        std::string cmd = std::string(*c) + " -v 2>&1";
-        FILE* fp = POPEN(cmd.c_str(), "r");
+    for (const char* c : {"luac5.4", "luac54", "luac"}) {
+        std::string cmd = std::string(c) + " -v 2>&1";
+        FILE* fp = popen(cmd.c_str(), "r");
         if (!fp) continue;
         char buf[64] = {};
-        std::fread(buf, 1, sizeof(buf) - 1, fp);
-        PCLOSE(fp);
-        // Check it says "Lua 5.4"
-        if (std::strstr(buf, "Lua 5.4") || std::strstr(buf, "Lua5.4"))
-            return *c;
+        size_t n = std::fread(buf, 1, sizeof(buf) - 1, fp);
+        (void)n;
+        pclose(fp);
+        if (std::strstr(buf, "Lua 5.4")) return c;
     }
     return "";
 }
 
-static std::string s_luac_path;
-static bool        s_luac_checked = false;
+static std::string shell_quote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) { if (c == '\'') out += "'\\''"; else out += c; }
+    return out + "'";
+}
 
-// -----------------------------------------------------------------------
-// compile_lua — compile a single .lua file to bytecode
-// -----------------------------------------------------------------------
 std::vector<uint8_t> compile_lua(const std::filesystem::path& lua_path) {
-    // Find luac once
-    if (!s_luac_checked) {
-        s_luac_path    = find_luac();
-        s_luac_checked = true;
-        if (s_luac_path.empty())
-            std::fprintf(stderr, "Warning: luac5.4 not found; Lua files will be included as source text.\n");
-    }
+    static const std::string luac = find_luac();
+    static bool warned = false;
+    static int  syntax_errors = 0;
 
-    if (s_luac_path.empty()) {
-        // Fall back: include raw source text (Lua can interpret source too)
-        std::ifstream f(lua_path, std::ios::binary | std::ios::ate);
-        if (!f) return {};
-        auto sz = f.tellg(); f.seekg(0);
-        std::vector<uint8_t> data(sz);
-        f.read(reinterpret_cast<char*>(data.data()), sz);
-        return data;
-    }
-
-    // Create a temp output file
-    char tmp_out[] = "/tmp/wesnoth_n64_lua_XXXXXX";
-#ifdef _WIN32
-    char tmp_buf[256];
-    std::snprintf(tmp_buf, sizeof(tmp_buf), "wesnoth_n64_%u.luac",
-                  (unsigned)std::hash<std::string>{}(lua_path.string()));
-    std::string tmp_path = tmp_buf;
-#else
-    int fd = mkstemp(tmp_out);
-    if (fd >= 0) close(fd);
-    std::string tmp_path = tmp_out;
-#endif
-
-    // Run luac
-    // -s : strip debug information (saves ROM space)
-    // -o : output file
-    std::string cmd = s_luac_path + " -s -o \"" + tmp_path + "\" \"" +
-                      lua_path.string() + "\" 2>&1";
-
-    FILE* fp = POPEN(cmd.c_str(), "r");
-    if (fp) {
-        char err[256] = {};
-        if (std::fread(err, 1, sizeof(err) - 1, fp) > 0)
-            std::fprintf(stderr, "  luac: %s: %s\n", lua_path.filename().c_str(), err);
-        PCLOSE(fp);
-    }
-
-    // Read compiled bytecode
-    std::ifstream f(tmp_path, std::ios::binary | std::ios::ate);
-    if (!f) {
-        // Compilation failed — fall back to source
-        std::fprintf(stderr, "  luac failed for %s, including source\n",
-                     lua_path.c_str());
-        std::remove(tmp_path.c_str());
-        std::ifstream src(lua_path, std::ios::binary | std::ios::ate);
-        if (!src) return {};
-        auto sz = src.tellg(); src.seekg(0);
-        std::vector<uint8_t> data(sz);
-        src.read(reinterpret_cast<char*>(data.data()), sz);
-        return data;
-    }
-
-    auto sz = f.tellg(); f.seekg(0);
-    std::vector<uint8_t> data(sz);
+    std::ifstream f(lua_path, std::ios::binary | std::ios::ate);
+    if (!f) return {};
+    auto sz = f.tellg();
+    f.seekg(0);
+    std::vector<uint8_t> data((size_t)sz);
     f.read(reinterpret_cast<char*>(data.data()), sz);
-    f.close();
-    std::remove(tmp_path.c_str());
+
+    if (luac.empty()) {
+        if (!warned) {
+            std::fprintf(stderr, "Note: luac5.4 not found; Lua syntax is not checked at pack time.\n");
+            warned = true;
+        }
+        return data;
+    }
+
+    // -p: parse only, no output file.
+    std::string cmd = luac + " -p " + shell_quote(lua_path.string()) + " 2>&1";
+    if (FILE* fp = popen(cmd.c_str(), "r")) {
+        char err[512] = {};
+        size_t n = std::fread(err, 1, sizeof(err) - 1, fp);
+        int rc = pclose(fp);
+        if (n > 0 || rc != 0) {
+            ++syntax_errors;
+            std::fprintf(stderr, "  luac -p: %s", n ? err : (lua_path.string() + ": failed\n").c_str());
+        }
+    }
     return data;
 }
 

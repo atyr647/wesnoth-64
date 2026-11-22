@@ -249,11 +249,24 @@ static std::vector<uint8_t> encode_adpcm(const std::vector<int16_t>& pcm) {
 // -----------------------------------------------------------------------
 // Public API
 // -----------------------------------------------------------------------
-std::vector<uint8_t> convert_sfx(const std::filesystem::path& path) {
+std::vector<uint8_t> convert_sfx(const std::filesystem::path& path, int max_ms) {
     std::vector<int16_t> pcm;
     if (path.extension() == ".ogg") pcm = decode_ogg(path);
     else if (path.extension() == ".wav") pcm = decode_wav(path);
     if (pcm.empty()) return {};
+
+    // The runtime keeps all live SFX in one small RAM pool, so long clips are
+    // cut at max_ms with a short linear fade-out to avoid a click.
+    if (max_ms > 0) {
+        size_t max_samples = (size_t)TARGET_RATE * max_ms / 1000;
+        if (pcm.size() > max_samples) {
+            pcm.resize(max_samples);
+            size_t fade = std::min<size_t>(max_samples, TARGET_RATE / 40); // 25 ms
+            for (size_t i = 0; i < fade; ++i)
+                pcm[max_samples - fade + i] =
+                    (int16_t)((int64_t)pcm[max_samples - fade + i] * (fade - i) / fade);
+        }
+    }
 
     // Return raw s16 PCM as bytes
     std::vector<uint8_t> out(pcm.size() * 2);

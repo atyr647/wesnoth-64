@@ -132,7 +132,20 @@ const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
         if (std::strncmp(wesnoth_path, *p, plen) == 0)
             return n64_romfs_find(wesnoth_path + plen);
     }
-    return n64_romfs_find(wesnoth_path);
+    if (const RomFsEntry* e = n64_romfs_find(wesnoth_path))
+        return e;
+
+    // The sound code passes bare names ("select-unit.wav", "sword-1.ogg");
+    // the files live under sounds/ in the ROMFS.
+    if (!std::strchr(wesnoth_path, '/')) {
+        char buf[96];
+        if (std::strlen(wesnoth_path) + sizeof("sounds/") <= sizeof(buf)) {
+            std::strcpy(buf, "sounds/");
+            std::strcat(buf, wesnoth_path);
+            return n64_romfs_find(buf);
+        }
+    }
+    return nullptr;
 }
 
 u16 n64_romfs_entry_count() { return (u16)s_entry_count; }

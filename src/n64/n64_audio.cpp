@@ -184,6 +184,17 @@ bool n64_music_is_playing() { return s_music.playing; }
 // SFX control
 // -----------------------------------------------------------------------
 N64SfxHandle n64_sfx_load(u32 rom_offset, u32 byte_length) {
+    // A clip larger than the whole pool can never be resident; refusing it
+    // here prevents writing past s_sfx_data. (The packer caps clip length.)
+    if (byte_length == 0 || byte_length > SFX_DATA_BUDGET) {
+        N64_LOG("SFX: refusing %u-byte clip (pool is %u)", (unsigned)byte_length,
+                (unsigned)SFX_DATA_BUDGET);
+        return N64_SFX_INVALID;
+    }
+    // Cache-line (16 B) granularity: DMA targets are invalidated from the data
+    // cache by line, so a clip must not share a line with its neighbour.
+    const u32 span = (byte_length + 15u) & ~15u;
+
     // Check cache first
     u32 lru_frame = 0xFFFFFFFF;
     u16 lru_slot  = 0;
@@ -210,18 +221,19 @@ N64SfxHandle n64_sfx_load(u32 rom_offset, u32 byte_length) {
     // If we're evicting, we can't easily reclaim the PCM data memory from the
     // linear pool. We accept this leak across the pool reset at scenario end.
     // If the pool overflows, reset it and reload.
-    if (s_sfx_data_used + byte_length > SFX_DATA_BUDGET) {
+    if (s_sfx_data_used + span > SFX_DATA_BUDGET) {
         // Reset and re-mark all cache entries invalid
         s_sfx_data_used = 0;
         for (auto& e : s_sfx_cache) e.in_use = false;
     }
 
     s16* dest = reinterpret_cast<s16*>(s_sfx_data + s_sfx_data_used);
-    s_sfx_data_used += byte_length;
+    s_sfx_data_used += span;
 
 #ifdef N64_BUILD
-    data_cache_hit_writeback_invalidate(dest, byte_length);
-    dma_read(dest, rom_offset, byte_length);
+    // Read the padded span: ROMFS data is 16-byte aligned and padded to 16.
+    data_cache_hit_writeback_invalidate(dest, span);
+    dma_read(dest, rom_offset, span);
 #else
     std::memset(dest, 0, byte_length);
 #endif

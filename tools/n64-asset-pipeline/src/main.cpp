@@ -31,6 +31,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 using namespace n64pack;
@@ -46,7 +47,9 @@ static void print_usage(const char* prog) {
         "  --campaign <name>   Include only this campaign\n"
         "  --all-campaigns     Include all campaigns\n"
         "  --scale <n>         Texture downscale factor (default: 4)\n"
-        "  --no-music          Skip music conversion\n"
+        "  --no-music          Skip music (this is the default)\n"
+        "  --music-budget-mb <n>  Pack music, smallest tracks first, up to n MB\n"
+        "  --sfx-max-ms <n>    Truncate sound effects longer than n ms (default: 1500)\n"
         "  --english-only      Skip non-English translations\n"
         "  --verbose           Verbose output\n"
         "  --help              Show this help\n"
@@ -136,7 +139,9 @@ static bool write_rom(const fs::path& path, const std::vector<uint8_t>& data) {
 int main(int argc, char** argv) {
     PipelineOptions opts{};
     opts.texture_scale   = 4;
-    opts.convert_music   = true;
+    opts.convert_music   = false;
+    opts.music_budget_mb = 0;
+    opts.sfx_max_ms      = 1500;
     opts.english_only    = false;
     opts.verbose         = false;
     opts.all_campaigns   = false;
@@ -147,7 +152,14 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--help") == 0)        { print_usage(argv[0]); return 0; }
         else if (std::strcmp(argv[i], "--verbose") == 0) { opts.verbose = true; }
-        else if (std::strcmp(argv[i], "--no-music") == 0) { opts.convert_music = false; }
+        else if (std::strcmp(argv[i], "--no-music") == 0) { opts.convert_music = false; opts.music_budget_mb = 0; }
+        else if (std::strcmp(argv[i], "--music-budget-mb") == 0 && i + 1 < argc) {
+            opts.music_budget_mb = std::max(0, std::atoi(argv[++i]));
+            opts.convert_music = opts.music_budget_mb > 0;
+        }
+        else if (std::strcmp(argv[i], "--sfx-max-ms") == 0 && i + 1 < argc) {
+            opts.sfx_max_ms = std::max(0, std::atoi(argv[++i]));
+        }
         else if (std::strcmp(argv[i], "--english-only") == 0) { opts.english_only = true; }
         else if (std::strcmp(argv[i], "--all-campaigns") == 0) { opts.all_campaigns = true; }
         else if (std::strcmp(argv[i], "--campaign") == 0 && i + 1 < argc) {
@@ -180,7 +192,9 @@ int main(int argc, char** argv) {
     std::printf("Output    : %s\n", input_rom_path.c_str());
     std::printf("Campaign  : %s\n", opts.campaign.empty() ? "(all)" : opts.campaign.c_str());
     std::printf("Scale     : 1/%d\n", opts.texture_scale);
-    std::printf("Music     : %s\n", opts.convert_music ? "ADPCM" : "skipped");
+    if (opts.convert_music) std::printf("Music     : ADPCM, budget %d MB\n", opts.music_budget_mb);
+    else                    std::printf("Music     : skipped\n");
+    std::printf("SFX       : 22050 Hz mono s16, max %d ms\n", opts.sfx_max_ms);
     std::printf("\n");
 
     std::vector<AssetEntry> assets;
@@ -202,26 +216,50 @@ int main(int argc, char** argv) {
 
     // --- Step 2: Walk the data directory ---
     size_t img_count = 0, sfx_count = 0, mus_count = 0, wml_count = 0, lua_count = 0;
+    std::vector<std::pair<fs::path, std::string>> music_files;
 
-    for (auto& de : fs::recursive_directory_iterator(opts.wesnoth_data_dir,
-                       fs::directory_options::skip_permission_denied)) {
-        if (!de.is_regular_file()) continue;
-        const fs::path& p = de.path();
+    // Work list: data/ (campaign-filtered) plus the repo's top-level images/
+    // and sounds/ trees, which hold the UI art and UI sounds ("select-unit.wav").
+    // Names already taken by an earlier tree win.
+    std::vector<std::pair<fs::path, std::string>> work;
+    {
+        std::unordered_set<std::string> taken;
+        auto add = [&](const fs::path& p, const std::string& name) {
+            if (taken.insert(name).second) work.emplace_back(p, name);
+        };
+        for (auto& de : fs::recursive_directory_iterator(opts.wesnoth_data_dir,
+                           fs::directory_options::skip_permission_denied)) {
+            if (!de.is_regular_file()) continue;
+            const fs::path& p = de.path();
 
-        // Filter by campaign if specified
-        if (!opts.campaign.empty() && !opts.all_campaigns) {
-            auto ps = p.generic_string();
-            bool in_core     = ps.find("/core/")     != std::string::npos;
-            bool in_campaign = ps.find("/" + opts.campaign + "/") != std::string::npos;
-            bool in_shared   = ps.find("/themes/") != std::string::npos ||
-                               ps.find("/gui/")    != std::string::npos ||
-                               ps.find("/ai/")     != std::string::npos ||
-                               ps.find("/fonts/")  != std::string::npos;
-            if (!in_core && !in_campaign && !in_shared) continue;
+            // Filter by campaign if specified
+            if (!opts.campaign.empty() && !opts.all_campaigns) {
+                auto ps = p.generic_string();
+                bool in_core     = ps.find("/core/")     != std::string::npos;
+                bool in_campaign = ps.find("/" + opts.campaign + "/") != std::string::npos;
+                bool in_shared   = ps.find("/themes/") != std::string::npos ||
+                                   ps.find("/gui/")    != std::string::npos ||
+                                   ps.find("/ai/")     != std::string::npos ||
+                                   ps.find("/fonts/")  != std::string::npos;
+                if (!in_core && !in_campaign && !in_shared) continue;
+            }
+            add(p, romfs_name(p, opts.wesnoth_data_dir));
         }
+        const fs::path repo_root = fs::absolute(opts.wesnoth_data_dir).parent_path();
+        for (const char* tree : {"images", "sounds"}) {
+            fs::path root = repo_root / tree;
+            if (!fs::is_directory(root)) continue;
+            for (auto& de : fs::recursive_directory_iterator(root,
+                               fs::directory_options::skip_permission_denied)) {
+                if (!de.is_regular_file()) continue;
+                add(de.path(), std::string(tree) + "/" +
+                               fs::relative(de.path(), root).generic_string());
+            }
+        }
+    }
 
-        std::string rom_name = romfs_name(p, opts.wesnoth_data_dir);
-        AssetEntry entry;
+    for (const auto& [p, rom_name] : work) {
+        AssetEntry entry{};
         entry.name = rom_name;
 
         if (is_image(p)) {
@@ -243,7 +281,7 @@ int main(int argc, char** argv) {
 
         } else if (is_sfx(p)) {
             entry.type = ASSET_SFX;
-            entry.data = convert_sfx(p);
+            entry.data = convert_sfx(p, opts.sfx_max_ms);
             if (entry.data.empty()) continue;
             swap_pairs(entry.data);
             if (opts.verbose)
@@ -251,13 +289,9 @@ int main(int argc, char** argv) {
             ++sfx_count;
 
         } else if (is_music(p)) {
-            if (!opts.convert_music) continue;
-            entry.type = ASSET_MUSIC;
-            entry.data = convert_music(p);
-            if (entry.data.empty()) continue;
-            if (opts.verbose)
-                std::printf("[mus ] %s (%zu B)\n", rom_name.c_str(), entry.data.size());
-            ++mus_count;
+            // Converted after the walk so the size budget can pick tracks.
+            if (opts.convert_music) music_files.push_back({p, rom_name});
+            continue;
 
         } else if (is_wml(p)) {
             entry.type = ASSET_WML;
@@ -280,6 +314,31 @@ int main(int argc, char** argv) {
         }
 
         assets.push_back(std::move(entry));
+    }
+
+    // --- Music: smallest source files first, until the budget is spent ---
+    if (!music_files.empty()) {
+        std::sort(music_files.begin(), music_files.end(),
+                  [](const auto& a, const auto& b) {
+                      return fs::file_size(a.first) < fs::file_size(b.first);
+                  });
+        const uint64_t budget = (uint64_t)opts.music_budget_mb * 1024 * 1024;
+        uint64_t used = 0;
+        for (const auto& [mp, mname] : music_files) {
+            std::vector<uint8_t> d = convert_music(mp);
+            if (d.empty()) continue;
+            if (used + d.size() > budget) {
+                if (opts.verbose) std::printf("[mus ] over budget, skipping %s\n", mname.c_str());
+                continue;
+            }
+            used += d.size();
+            AssetEntry me;
+            me.name = mname; me.type = ASSET_MUSIC; me.data = std::move(d);
+            me.width = me.height = 0; me.rom_offset = 0;
+            if (opts.verbose) std::printf("[mus ] %s (%zu B)\n", mname.c_str(), me.data.size());
+            assets.push_back(std::move(me));
+            ++mus_count;
+        }
     }
 
     std::printf("\nAssets collected:\n");
