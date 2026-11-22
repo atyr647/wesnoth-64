@@ -88,7 +88,7 @@ struct RomFsWireEntry {
     u8  type;
     u8  pad[3];
     u32 name_off;      // into the string table (debug)
-    u32 reserved;
+    u32 reserved[2];
 };
 static_assert(sizeof(RomFsHeader) == 32, "RomFsHeader wire size");
 static_assert(sizeof(RomFsWireEntry) == 32, "RomFsWireEntry wire size");
