@@ -148,4 +148,18 @@ const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path) {
     return nullptr;
 }
 
+u32 n64_romfs_read(const RomFsEntry* e, void* dst, u32 capacity) {
+    if (!e || !dst) return 0;
+    const u32 span = (e->byte_length + 15u) & ~15u;
+    if (span > capacity) return 0;
+#ifdef N64_BUILD
+    data_cache_hit_writeback_invalidate(dst, span);
+    dma_read(dst, e->rom_offset, span);
+    data_cache_hit_invalidate(dst, span);
+    return e->byte_length;
+#else
+    return 0;
+#endif
+}
+
 u16 n64_romfs_entry_count() { return (u16)s_entry_count; }

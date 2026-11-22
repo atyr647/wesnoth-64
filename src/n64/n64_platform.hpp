@@ -21,6 +21,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#ifdef __cplusplus
+#  include <cstring>   // std::memset etc. (the engine build gets these via the shims)
+#  include <cstdlib>
+#endif
 
 // -----------------------------------------------------------------------
 // Basic integer types (mirrors what SDL2 / Boost provided)

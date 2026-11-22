@@ -614,7 +614,10 @@ if(N64_BUILD)
         LUAI_MAXCSTACK=200
     )
 
-    add_executable(wesnoth_n64 ${N64_GAME_SOURCES})
+    # The full-engine port does not fit the console's 8 MiB (ELF ~9.2 MB, plus
+    # heap) and is opt-in: `cmake --build . --target wesnoth_n64` with
+    # -DN64_ENFORCE_SIZE_LIMIT=OFF. The default ROM is wesnoth_n64_app below.
+    add_executable(wesnoth_n64 EXCLUDE_FROM_ALL ${N64_GAME_SOURCES})
 
     target_include_directories(wesnoth_n64 PRIVATE
         src/
@@ -740,11 +743,39 @@ if(N64_BUILD)
         m c gcc
     )
 
+    # The runnable ROM: a native front-end (title, campaign/scenario browser and
+    # a real-map hex viewer) built on the port's platform layer and the ROMFS.
+    # It does not link the Wesnoth engine, which does not fit the console's RAM.
+    add_executable(wesnoth_n64_app
+        src/n64/app/n64_app_main.cpp
+        src/n64/n64_romfs.cpp
+        src/n64/n64_memory.cpp
+        src/n64/n64_video.cpp
+        src/n64/n64_audio.cpp
+        src/n64/n64_input.cpp
+        src/n64/n64_gui.cpp
+    )
+    target_include_directories(wesnoth_n64_app PRIVATE src/ src/n64/ ${N64_INST}/include)
+    target_compile_definitions(wesnoth_n64_app PRIVATE N64_BUILD=1)
+    target_compile_options(wesnoth_n64_app PRIVATE -Oz)
+    target_link_options(wesnoth_n64_app PRIVATE
+        -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld
+        -Wl,--wrap=__do_global_ctors
+        -Wl,--gc-sections
+        -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64_app.map
+    )
+    target_link_libraries(wesnoth_n64_app PRIVATE
+        ${N64_INST}/mips64-elf/lib/libdragon.a
+        ${N64_INST}/mips64-elf/lib/libdragonsys.a
+        m c gcc
+    )
+
     # ROMFS blob built by tools/n64-asset-pipeline (see tools/n64-build-romfs.sh).
     # Without it the ROM still builds, but n64_romfs_init() fails at boot.
     set(WESNOTH_N64_ROMFS "" CACHE FILEPATH "Path to wesnoth.wnrf to append to the ROM")
     n64_create_rom(wesnoth_n64 "${WESNOTH_N64_ROMFS}")
     n64_create_rom(wesnoth_n64_smoke "${WESNOTH_N64_ROMFS}")
+    n64_create_rom(wesnoth_n64_app "${WESNOTH_N64_ROMFS}")
 
     # Asset pipeline tool (host-side, always built with the host compiler)
     # add_subdirectory(tools/n64-asset-pipeline)

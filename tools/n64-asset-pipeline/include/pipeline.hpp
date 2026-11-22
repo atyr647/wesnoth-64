@@ -26,6 +26,7 @@ enum AssetType : uint8_t {
     ASSET_WML      = 3,
     ASSET_LUA      = 4,
     ASSET_FONT     = 5,
+    ASSET_DATA     = 6,   // raw bytes: maps, terrain-code table, manifest
 };
 
 // -----------------------------------------------------------------------

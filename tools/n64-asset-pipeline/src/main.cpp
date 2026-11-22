@@ -81,6 +81,48 @@ static bool is_music(const fs::path& p) {
 }
 static bool is_wml(const fs::path& p) { return has_ext(p, ".cfg"); }
 static bool is_lua(const fs::path& p) { return has_ext(p, ".lua"); }
+static bool is_map(const fs::path& p) { return has_ext(p, ".map"); }
+
+static std::vector<uint8_t> read_file(const fs::path& p) {
+    std::ifstream f(p, std::ios::binary | std::ios::ate);
+    if (!f) return {};
+    auto sz = f.tellg();
+    f.seekg(0);
+    std::vector<uint8_t> d((size_t)sz);
+    f.read(reinterpret_cast<char*>(d.data()), sz);
+    return d;
+}
+
+static AssetEntry data_asset(const std::string& name, const std::string& text) {
+    AssetEntry e{};
+    e.name = name;
+    e.type = ASSET_DATA;
+    e.data.assign(text.begin(), text.end());
+    return e;
+}
+
+// Terrain code -> texture table, generated from data/core/terrain.cfg so the
+// ROM follows Wesnoth's own definitions. One "CODE<TAB>images/terrain/x.png"
+// line per [terrain_type] that has both string= and symbol_image=.
+static std::string build_terrain_table(const fs::path& terrain_cfg) {
+    std::ifstream f(terrain_cfg);
+    std::string line, out, code, img;
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r"), b = s.find_last_not_of(" \t\r");
+        return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+    };
+    while (std::getline(f, line)) {
+        line = trim(line);
+        if (line == "[terrain_type]") { code.clear(); img.clear(); }
+        else if (line.rfind("string=", 0) == 0) code = trim(line.substr(7));
+        else if (line.rfind("symbol_image=", 0) == 0) img = trim(line.substr(13));
+        else if (line == "[/terrain_type]") {
+            if (!code.empty() && !img.empty() && img.find('~') == std::string::npos && img.find(',') == std::string::npos)
+                out += code + "\timages/terrain/" + img + ".png\n";
+        }
+    }
+    return out;
+}
 
 // -----------------------------------------------------------------------
 // Derive the ROM filesystem name from a data/ path
@@ -215,7 +257,7 @@ int main(int argc, char** argv) {
     }
 
     // --- Step 2: Walk the data directory ---
-    size_t img_count = 0, sfx_count = 0, mus_count = 0, wml_count = 0, lua_count = 0;
+    size_t img_count = 0, sfx_count = 0, mus_count = 0, wml_count = 0, lua_count = 0, map_count = 0;
     std::vector<std::pair<fs::path, std::string>> music_files;
 
     // Work list: data/ (campaign-filtered) plus the repo's top-level images/
@@ -241,7 +283,7 @@ int main(int argc, char** argv) {
                                    ps.find("/gui/")    != std::string::npos ||
                                    ps.find("/ai/")     != std::string::npos ||
                                    ps.find("/fonts/")  != std::string::npos;
-                if (!in_core && !in_campaign && !in_shared) continue;
+                if (!in_core && !in_campaign && !in_shared && !is_map(p)) continue;
             }
             add(p, romfs_name(p, opts.wesnoth_data_dir));
         }
@@ -293,6 +335,14 @@ int main(int argc, char** argv) {
             if (opts.convert_music) music_files.push_back({p, rom_name});
             continue;
 
+        } else if (is_map(p)) {
+            if (rom_name.rfind("campaigns/", 0) != 0) continue;
+            entry.type = ASSET_DATA;
+            entry.data = read_file(p);
+            if (entry.data.empty()) continue;
+            if (opts.verbose) std::printf("[map ] %s (%zu B)\n", rom_name.c_str(), entry.data.size());
+            ++map_count;
+
         } else if (is_wml(p)) {
             entry.type = ASSET_WML;
             entry.data = compile_wml(p, opts.wesnoth_data_dir);
@@ -314,6 +364,28 @@ int main(int argc, char** argv) {
         }
 
         assets.push_back(std::move(entry));
+    }
+
+    // --- Front-end data: terrain-code table and campaign/map manifest ---
+    {
+        std::string table = build_terrain_table(opts.wesnoth_data_dir / "core" / "terrain.cfg");
+        assets.push_back(data_asset("app/terrain_codes.txt", table));
+
+        // One "<campaign>\t<map path>" line per packed campaign map, sorted.
+        std::vector<std::string> lines;
+        for (const auto& a : assets) {
+            if (a.type != ASSET_DATA || a.name.rfind("campaigns/", 0) != 0) continue;
+            size_t c0 = std::strlen("campaigns/");
+            size_t c1 = a.name.find('/', c0);
+            if (c1 == std::string::npos) continue;
+            lines.push_back(a.name.substr(c0, c1 - c0) + "\t" + a.name);
+        }
+        std::sort(lines.begin(), lines.end());
+        std::string manifest;
+        for (const auto& l : lines) manifest += l + "\n";
+        assets.push_back(data_asset("app/manifest.txt", manifest));
+        std::printf("[app ] terrain table %zu codes, manifest %zu maps\n",
+                    (size_t)std::count(table.begin(), table.end(), '\n'), lines.size());
     }
 
     // --- Music: smallest source files first, until the budget is spent ---
@@ -347,6 +419,7 @@ int main(int argc, char** argv) {
     std::printf("  Music    : %zu\n", mus_count);
     std::printf("  WML      : %zu\n", wml_count);
     std::printf("  Lua      : %zu\n", lua_count);
+    std::printf("  Maps     : %zu\n", map_count);
     std::printf("  Total    : %zu entries\n", assets.size());
 
     // --- Step 3: Build the ROMFS blob ---

@@ -16,6 +16,40 @@
 #include <cstring>
 
 // -----------------------------------------------------------------------
+// Directional navigation for the menus: the D-pad and the analog stick both
+// work, with auto-repeat on a held D-pad. Returns -1 (up/left), 0, +1 (down/right).
+// The input module reports stick-up as cursor_dy > 0, so it is flipped here to
+// screen orientation. (The D-pad is mapped to game actions -- Up=quicksave,
+// Down=end turn, Left=undo, Right=unit info -- so those are read directly.)
+// -----------------------------------------------------------------------
+static int nav_axis(bool neg_pressed, bool neg_held, bool pos_pressed, bool pos_held,
+                    int stick_screen, int& hold) {
+    if (neg_pressed) { hold = 0; return -1; }
+    if (pos_pressed) { hold = 0; return  1; }
+    if (stick_screen) return stick_screen;
+    if (neg_held || pos_held) {
+        ++hold;
+        if (hold > 14 && (hold % 4) == 0) return neg_held ? -1 : 1;
+    } else {
+        hold = 0;
+    }
+    return 0;
+}
+static int nav_dy(const N64InputState& in) {
+    static int hold = 0;
+    return nav_axis(in.just_pressed[N64_ACTION_QUICKSAVE], in.held[N64_ACTION_QUICKSAVE],
+                    in.just_pressed[N64_ACTION_END_TURN],  in.held[N64_ACTION_END_TURN],
+                    -(int)in.cursor_dy, hold);
+}
+static int nav_dx(const N64InputState& in) {
+    static int hold = 0;
+    return nav_axis(in.just_pressed[N64_ACTION_UNDO],      in.held[N64_ACTION_UNDO],
+                    in.just_pressed[N64_ACTION_UNIT_INFO], in.held[N64_ACTION_UNIT_INFO],
+                    (int)in.cursor_dx, hold);
+}
+
+
+// -----------------------------------------------------------------------
 // Shared rendering helpers
 // -----------------------------------------------------------------------
 static constexpr s16 MENU_X      = 20;
@@ -159,8 +193,11 @@ int n64_menu_show(const std::string& title,
 
         // Input
         const N64InputState& inp = n64_input_get(0);
-        if (inp.cursor_dy < 0 && sel > 0) --sel;
-        if (inp.cursor_dy > 0 && sel < (int)items.size() - 1) ++sel;
+        {
+            int d = nav_dy(inp);
+            if (d < 0 && sel > 0) --sel;
+            if (d > 0 && sel < (int)items.size() - 1) ++sel;
+        }
 
         if (inp.just_pressed[N64_ACTION_SELECT]) {
             if (items[sel].enabled) return items[sel].value;
@@ -218,8 +255,11 @@ int n64_message_box(const std::string& title,
         n64_video_flip();
 
         const N64InputState& inp = n64_input_get(0);
-        if (inp.cursor_dx < 0 && btn_sel > 0) --btn_sel;
-        if (inp.cursor_dx > 0 && btn_sel < btn_count - 1) ++btn_sel;
+        {
+            int d = nav_dx(inp);
+            if (d < 0 && btn_sel > 0) --btn_sel;
+            if (d > 0 && btn_sel < btn_count - 1) ++btn_sel;
+        }
         if (inp.just_pressed[N64_ACTION_SELECT]) return btn_sel;
         if (inp.just_pressed[N64_ACTION_CANCEL] && btn_count > 1) return 1;
     }
@@ -282,8 +322,11 @@ int n64_attack_dialog(const std::string& attacker_name, int attacker_hp, int att
         n64_video_flip();
 
         const N64InputState& inp = n64_input_get(0);
-        if (inp.cursor_dy < 0 && sel > 0) --sel;
-        if (inp.cursor_dy > 0 && sel < (int)weapons.size() - 1) ++sel;
+        {
+            int d = nav_dy(inp);
+            if (d < 0 && sel > 0) --sel;
+            if (d > 0 && sel < (int)weapons.size() - 1) ++sel;
+        }
         if (inp.just_pressed[N64_ACTION_SELECT]) return sel;
         if (inp.just_pressed[N64_ACTION_CANCEL]) return -1;
     }
@@ -371,8 +414,9 @@ void n64_story_show(const std::vector<N64StoryPart>& parts) {
             n64_video_flip();
 
             const N64InputState& inp = n64_input_get(0);
-            if (inp.cursor_dy < 0 && scroll > 0) --scroll;
-            if (inp.cursor_dy > 0 && scroll < max_scroll) ++scroll;
+            int d = nav_dy(inp);
+            if (d < 0 && scroll > 0) --scroll;
+            if (d > 0 && scroll < max_scroll) ++scroll;
             if (inp.just_pressed[N64_ACTION_SELECT]) done = true;
             if (inp.just_pressed[N64_ACTION_CANCEL]) return; // skip all
         }

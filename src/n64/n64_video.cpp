@@ -50,9 +50,16 @@ struct DrawCmd {
         struct { N64TexHandle atlas; N64Rect src; s16 x, y; } tex_region;
         struct { N64Rect r; N64Color c; }                    rect;
         struct { s16 x1, x2, y; N64Color c; }               hline;
-        struct { s16 x, y; u16 str_handle; N64Color c; }    text;
+        struct { s16 x, y; u16 text_off; N64Color c; }       text;
     };
 };
+
+// Text is copied into a per-frame buffer (reset by n64_video_flip) instead of
+// the permanent string-intern table: dynamic text (counters, coordinates)
+// would otherwise grow that table until it overflowed.
+static constexpr size_t TEXT_BUF_CAP = 8192;
+static char  s_frame_text[TEXT_BUF_CAP];
+static u16   s_frame_text_used = 0;
 
 // Per-layer command queues (max 256 commands per layer per frame)
 static constexpr size_t CMD_QUEUE_CAP = 256;
@@ -160,6 +167,7 @@ void n64_video_flip() {
     // Reset command queues for next frame
     for (int i = 0; i < LAYER_COUNT; ++i)
         s_cmd_count[i] = 0;
+    s_frame_text_used = 0;
 }
 
 // -----------------------------------------------------------------------
@@ -229,7 +237,8 @@ void n64_texcache_flush() {
 // Queue helpers
 // -----------------------------------------------------------------------
 static DrawCmd* alloc_cmd(N64Layer layer) {
-    N64_ASSERT(s_cmd_count[layer] < CMD_QUEUE_CAP);
+    // A full queue drops the draw rather than hanging the console.
+    if (s_cmd_count[layer] >= CMD_QUEUE_CAP) return nullptr;
     DrawCmd* cmd = &s_cmds[layer][s_cmd_count[layer]++];
     cmd->layer = layer;
     return cmd;
@@ -240,6 +249,7 @@ static DrawCmd* alloc_cmd(N64Layer layer) {
 // -----------------------------------------------------------------------
 void n64_draw_texture(N64Layer layer, N64TexHandle tex, s16 x, s16 y) {
     DrawCmd* cmd = alloc_cmd(layer);
+    if (!cmd) return;
     cmd->type    = CMD_TEX;
     cmd->tex     = { tex, x, y };
 }
@@ -247,18 +257,21 @@ void n64_draw_texture(N64Layer layer, N64TexHandle tex, s16 x, s16 y) {
 void n64_draw_texture_region(N64Layer layer, N64TexHandle atlas,
                               N64Rect src, s16 dst_x, s16 dst_y) {
     DrawCmd* cmd       = alloc_cmd(layer);
+    if (!cmd) return;
     cmd->type          = CMD_TEX_REGION;
     cmd->tex_region    = { atlas, src, dst_x, dst_y };
 }
 
 void n64_draw_rect(N64Layer layer, N64Rect r, N64Color c) {
     DrawCmd* cmd  = alloc_cmd(layer);
+    if (!cmd) return;
     cmd->type     = CMD_RECT;
     cmd->rect     = { r, c };
 }
 
 void n64_draw_hline(N64Layer layer, s16 x1, s16 x2, s16 y, N64Color c) {
     DrawCmd* cmd  = alloc_cmd(layer);
+    if (!cmd) return;
     cmd->type     = CMD_HLINE;
     cmd->hline    = { x1, x2, y, c };
 }
@@ -294,12 +307,17 @@ void n64_draw_hex_tile(N64Layer layer, N64TexHandle tex, s16 hx, s16 hy) {
 // -----------------------------------------------------------------------
 void n64_draw_text(s16 x, s16 y, const char* text, N64Color colour) {
     if (!text || !*text) return;
-    // Intern and queue — actual blitting happens in n64_flush_layer
-    u16 handle = n64_intern(text);
+    // Copy into the per-frame buffer and queue — blitting happens in
+    // n64_flush_layer. Text that does not fit this frame is dropped.
+    size_t len = strlen(text) + 1;
+    if (s_frame_text_used + len > TEXT_BUF_CAP || s_cmd_count[LAYER_TEXT] >= CMD_QUEUE_CAP)
+        return;
+    memcpy(s_frame_text + s_frame_text_used, text, len);
     DrawCmd* cmd = alloc_cmd(LAYER_TEXT);
+    if (!cmd) return;
     cmd->type    = CMD_TEXT;
-    cmd->text    = { x, y, handle, colour };
-    (void)colour;
+    cmd->text    = { x, y, s_frame_text_used, colour };
+    s_frame_text_used += (u16)len;
 }
 
 void n64_draw_text_shadowed(s16 x, s16 y, const char* text, N64Color colour) {
@@ -365,7 +383,7 @@ void n64_flush_layer(N64Layer layer) {
             break;
         case CMD_TEXT: {
             // Blit glyph by glyph from the glyph sheet, tinted by the text colour
-            const char* s = n64_str(cmd.text.str_handle);
+            const char* s = s_frame_text + cmd.text.text_off;
             s16 cx = cmd.text.x;
 #ifdef N64_BUILD
             surface_t sheet = tex_surface(s_tex_cache[s_glyph_sheet].tex);

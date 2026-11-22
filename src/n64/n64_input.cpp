@@ -11,7 +11,6 @@
 #  include <joypad.h>
 #endif
 
-#include "../hotkey/hotkey_command.hpp"
 
 // -----------------------------------------------------------------------
 // Configuration
@@ -32,23 +31,26 @@ static PortState s_ports[4];
 static u8        s_active_port = 0;
 
 // -----------------------------------------------------------------------
-// Button bitmask constants (matching joypad_buttons_t.raw bit positions)
+// Button bitmask constants for joypad_buttons_t.raw.
+// libdragon declares the buttons as a packed C bitfield; on big-endian MIPS the
+// first field (a) is the most significant bit, i.e. the same order as the
+// controller's wire format (A = 0x8000 ... C-Right = 0x0001).
 // -----------------------------------------------------------------------
 #ifdef N64_BUILD
-static constexpr u16 BTN_A     = (1 << 0);
-static constexpr u16 BTN_B     = (1 << 1);
-static constexpr u16 BTN_Z     = (1 << 2);
-static constexpr u16 BTN_START = (1 << 3);
-static constexpr u16 BTN_DU    = (1 << 4);
-static constexpr u16 BTN_DD    = (1 << 5);
-static constexpr u16 BTN_DL    = (1 << 6);
-static constexpr u16 BTN_DR    = (1 << 7);
-static constexpr u16 BTN_L     = (1 << 10);
-static constexpr u16 BTN_R     = (1 << 11);
-static constexpr u16 BTN_CU    = (1 << 12);
-static constexpr u16 BTN_CD    = (1 << 13);
-static constexpr u16 BTN_CL    = (1 << 14);
-static constexpr u16 BTN_CR    = (1 << 15);
+static constexpr u16 BTN_A     = 0x8000;
+static constexpr u16 BTN_B     = 0x4000;
+static constexpr u16 BTN_Z     = 0x2000;
+static constexpr u16 BTN_START = 0x1000;
+static constexpr u16 BTN_DU    = 0x0800;
+static constexpr u16 BTN_DD    = 0x0400;
+static constexpr u16 BTN_DL    = 0x0200;
+static constexpr u16 BTN_DR    = 0x0100;
+static constexpr u16 BTN_L     = 0x0020;
+static constexpr u16 BTN_R     = 0x0010;
+static constexpr u16 BTN_CU    = 0x0008;
+static constexpr u16 BTN_CD    = 0x0004;
+static constexpr u16 BTN_CL    = 0x0002;
+static constexpr u16 BTN_CR    = 0x0001;
 #endif
 
 // -----------------------------------------------------------------------
@@ -207,26 +209,4 @@ u8 n64_input_connected_count() {
     for (u8 p = 0; p < 4; ++p)
         if (n64_input_connected(p)) ++c;
     return c;
-}
-
-// -----------------------------------------------------------------------
-// Hotkey translation
-// Maps N64 actions to src/hotkey/hotkey_command.hpp hotkey_command::type
-// -----------------------------------------------------------------------
-int n64_action_to_hotkey(N64Action action) {
-    using namespace hotkey;
-    switch (action) {
-    case N64_ACTION_SELECT:          return HOTKEY_SELECT_HEX;
-    case N64_ACTION_CANCEL:          return HOTKEY_DESELECT_HEX;
-    case N64_ACTION_END_TURN:        return HOTKEY_ENDTURN;
-    case N64_ACTION_UNDO:            return HOTKEY_UNDO;
-    case N64_ACTION_CYCLE_UNITS_FWD: return HOTKEY_CYCLE_UNITS;
-    case N64_ACTION_RECRUIT:         return HOTKEY_RECRUIT;
-    case N64_ACTION_RECALL:          return HOTKEY_RECALL;
-    case N64_ACTION_ATTACK:          return HOTKEY_SELECT_AND_ACTION;
-    case N64_ACTION_QUICKSAVE:       return HOTKEY_SAVE_GAME;
-    case N64_ACTION_GAME_MENU:       return HOTKEY_QUIT_GAME;
-    case N64_ACTION_UNIT_INFO:       return HOTKEY_UNIT_DESCRIPTION;
-    default:                         return HOTKEY_NULL;
-    }
 }

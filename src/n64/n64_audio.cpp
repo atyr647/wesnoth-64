@@ -247,6 +247,27 @@ N64SfxHandle n64_sfx_load(u32 rom_offset, u32 byte_length) {
     return slot;
 }
 
+#ifdef N64_BUILD
+// One persistent waveform per mixer channel. The mixer keeps the pointer it is
+// given by mixer_ch_play, so these must outlive the call (they used to be a
+// stack local) and must supply a read callback (a null one crashes the mixer).
+struct SfxWave {
+    waveform_t wv;
+    const s16* data;
+    int        len;
+};
+static SfxWave s_waves[CHAN_COUNT];
+
+// Samples are already resident in RAM; hand them to the mixer's sample buffer,
+// zero-padding past the end.
+static void sfx_read(void* ctx, samplebuffer_t* sbuf, int wpos, int wlen, bool /*seeking*/) {
+    const SfxWave* w = static_cast<const SfxWave*>(ctx);
+    s16* out = reinterpret_cast<s16*>(samplebuffer_append(sbuf, wlen));
+    for (int i = 0; i < wlen; ++i)
+        out[i] = (wpos + i < w->len) ? w->data[wpos + i] : 0;
+}
+#endif
+
 void n64_sfx_play(N64AudioChannel channel, N64SfxHandle sfx, u8 volume, int loops) {
     if (sfx == N64_SFX_INVALID) return;
     N64_ASSERT(channel < CHAN_COUNT && sfx < MAX_SFX_CACHE);
@@ -255,15 +276,20 @@ void n64_sfx_play(N64AudioChannel channel, N64SfxHandle sfx, u8 volume, int loop
     const SfxCacheEntry& e = s_sfx_cache[sfx];
     float vol = volume / 255.0f;
     mixer_ch_set_vol(channel, vol, vol);
-    // Use libdragon's waveform playback
-    waveform_t wv = {};
-    wv.bits   = 16;
-    wv.channels = 1;
-    wv.frequency = AUDIO_FREQ;
-    wv.len    = e.samples;
-    wv.loop_len = 0;
-    wv.read   = nullptr; // not using streaming for SFX
-    mixer_ch_play(channel, &wv);
+
+    SfxWave& w = s_waves[channel];
+    w.data = e.data;
+    w.len  = (int)e.samples;
+    w.wv = {};
+    w.wv.name      = "sfx";
+    w.wv.bits      = 16;
+    w.wv.channels  = 1;
+    w.wv.frequency = AUDIO_FREQ;
+    w.wv.len       = w.len;
+    w.wv.loop_len  = 0;
+    w.wv.read      = sfx_read;
+    w.wv.ctx       = &w;
+    mixer_ch_play(channel, &w.wv);
 #endif
 }
 

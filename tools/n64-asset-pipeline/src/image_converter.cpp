@@ -155,15 +155,23 @@ Texture16 convert_image(const std::filesystem::path& png_path,
     if (target_w <= 0) target_w = std::max(1, src.width  / 4);
     if (target_h <= 0) target_h = std::max(1, src.height / 4);
 
-    // Round up to power-of-2 for N64 TMEM
-    int tex_w = next_pow2(target_w);
-    int tex_h = next_pow2(target_h);
-
-    // Clamp to N64 TMEM limits:
-    //   max texture size with RGBA16: sqrt(4096/2) = ~45px per side
-    //   practical safe limit: 32x32 (fits cleanly in TMEM)
-    tex_w = std::min(tex_w, 64);
-    tex_h = std::min(tex_h, 64);
+    int tex_w, tex_h;
+    const bool wide = src.width > src.height * 3 / 2 || src.height > src.width * 3 / 2;
+    if (wide) {
+        // Strongly non-square art (logos, banners, panels): keep the aspect
+        // ratio instead of stretching to a square power of two. rdpq_tex_blit
+        // does not need power-of-two textures and splits large ones across
+        // TMEM loads itself. Fit within 160 x 120 at no more than 1/4 scale.
+        float k = std::min(0.25f, std::min(160.0f / src.width, 120.0f / src.height));
+        tex_w = std::max(1, (int)(src.width  * k + 0.5f));
+        tex_h = std::max(1, (int)(src.height * k + 0.5f));
+        tex_w = (tex_w + 1) & ~1;               // even widths keep rows 4-byte aligned
+    } else {
+        // Square-ish art (terrain, units): round up to a power of two, <= 64.
+        // The map viewer's hex geometry is built on 32 px tiles.
+        tex_w = std::min(next_pow2(target_w), 64);
+        tex_h = std::min(next_pow2(target_h), 64);
+    }
 
     // Downscale source to final texture dimensions
     Rgba8Image scaled = (src.width != tex_w || src.height != tex_h)

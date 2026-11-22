@@ -48,6 +48,7 @@ enum RomFsType : u8 {
     ROMFS_WML      = 3,  // compiled binary WML
     ROMFS_LUA      = 4,  // Lua 5.4 bytecode
     ROMFS_FONT     = 5,  // glyph sheet (RGBA5551)
+    ROMFS_DATA     = 6,  // raw bytes: maps, terrain-code table, manifest
 };
 
 // -----------------------------------------------------------------------
@@ -116,6 +117,10 @@ const RomFsEntry* n64_romfs_find(const char* filename);
 // Convenience: resolve a Wesnoth data/ path to a ROM entry.
 // e.g. n64_romfs_find_wesnoth("images/terrain/grass/green.png")
 const RomFsEntry* n64_romfs_find_wesnoth(const char* wesnoth_path);
+
+// DMA an entry's bytes into dst (cache-line aligned, capacity rounded up to 16).
+// Returns the byte length, or 0 if it does not fit.
+u32  n64_romfs_read(const RomFsEntry* e, void* dst, u32 capacity);
 
 // Total number of entries in the directory.
 u16  n64_romfs_entry_count();
