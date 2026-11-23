@@ -81,12 +81,13 @@ target_compile_definitions(n64_webp PRIVATE malloc=n64_vmalloc calloc=n64_vcallo
                                           realloc=n64_vrealloc free=n64_vfree)
 target_compile_options(n64_webp PRIVATE ${N64_SDL_COMPILE_OPTIONS})
 
-# SDL_image: PNG and JPEG through its bundled stb_image, WebP through libwebp;
-# PNG saving through its bundled miniz.
+# SDL_image: PNG and JPEG through its bundled stb_image, WebP through libwebp
+# (src/n64/sdl2/IMG_webp_n64.c: scaled decoding of oversized images); PNG
+# saving through its bundled miniz.
 set(_I "${N64_SDL_IMAGE_DIR}/src")
 add_library(n64_sdl2_image STATIC EXCLUDE_FROM_ALL
     ${_I}/IMG.c ${_I}/IMG_bmp.c ${_I}/IMG_gif.c ${_I}/IMG_jpg.c ${_I}/IMG_png.c
-    ${_I}/IMG_stb.c ${_I}/IMG_tga.c ${_I}/IMG_webp.c ${_I}/IMG_xcf.c ${_I}/IMG_xpm.c
+    ${_I}/IMG_stb.c ${_I}/IMG_tga.c ${CMAKE_SOURCE_DIR}/src/n64/sdl2/IMG_webp_n64.c ${_I}/IMG_xcf.c ${_I}/IMG_xpm.c
     ${_I}/IMG_xv.c ${_I}/IMG_pnm.c ${_I}/IMG_pcx.c ${_I}/IMG_lbm.c ${_I}/IMG_qoi.c
     ${_I}/IMG_svg.c ${_I}/IMG_tif.c ${_I}/IMG_avif.c ${_I}/IMG_jxl.c)
 target_include_directories(n64_sdl2_image PRIVATE "${N64_SDL2_INCLUDE_DIR}/SDL2")

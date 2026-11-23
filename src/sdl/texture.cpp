@@ -71,6 +71,14 @@ texture::texture(const surface& surf, bool linear_interpolation)
 	}
 
 	size_ = {surf->w, surf->h};
+#ifdef N64_BUILD
+	// Images too large for the console's memory are decoded at reduced
+	// resolution (src/n64/sdl2/IMG_webp_n64.c), which records the original
+	// size in the surface's userdata; keep laying them out at that size.
+	if(const auto orig = reinterpret_cast<uintptr_t>(surf->userdata); orig & 0x80000000u) {
+		size_ = {static_cast<int>((orig >> 16) & 0x7FFF), static_cast<int>(orig & 0xFFFF)};
+	}
+#endif
 
 	finalize();
 }

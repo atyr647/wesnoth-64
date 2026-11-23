@@ -36,9 +36,6 @@ std::map<std::tuple<face_entry*, int, bool, bool>, std::unique_ptr<font_inst>> s
 std::map<unsigned, face_entry*> s_fallback_cache;
 cairo_font_options_t* s_options = nullptr;
 
-// Above this size a font file is streamed from the VFS instead of loaded.
-constexpr std::uint64_t k_stream_threshold = 2u * 1024 * 1024;
-
 bool ft_init()
 {
     if (!s_ft && FT_Init_FreeType(&s_ft) != 0) {
@@ -54,35 +51,54 @@ std::string lower(std::string s)
     return s;
 }
 
-// FreeType stream over a VFS reader.
+// FreeType stream over a VFS reader, with a small block cache: FreeType
+// reads tables and glyph outlines in many small pieces.
+struct font_stream {
+    std::unique_ptr<n64vfs::reader> r;
+    static constexpr unsigned long k_block = 8192;
+    unsigned char block[k_block];
+    unsigned long block_pos = ~0ul, block_len = 0;
+};
+
 unsigned long stream_read(FT_Stream s, unsigned long offset, unsigned char* buffer, unsigned long count)
 {
-    auto* r = static_cast<n64vfs::reader*>(s->descriptor.pointer);
-    if (!r->seek(offset)) return count ? 0 : 1;      // count == 0: seek only (0 = success)
-    if (count == 0) return 0;
-    return (unsigned long)r->read(buffer, count);
+    auto* fs = static_cast<font_stream*>(s->descriptor.pointer);
+    if (count == 0) return offset <= s->size ? 0 : 1;     // seek only (0 = success)
+    unsigned long done = 0;
+    while (done < count) {
+        const unsigned long pos = offset + done;
+        if (pos >= s->size) break;
+        if (fs->block_pos == ~0ul || pos < fs->block_pos || pos >= fs->block_pos + fs->block_len) {
+            const unsigned long start = pos / font_stream::k_block * font_stream::k_block;
+            if (!fs->r->seek(start)) break;
+            fs->block_len = (unsigned long)fs->r->read(fs->block, font_stream::k_block);
+            fs->block_pos = start;
+            if (fs->block_len == 0) break;
+        }
+        const unsigned long avail = fs->block_pos + fs->block_len - pos;
+        const unsigned long n = std::min(avail, count - done);
+        std::memcpy(buffer + done, fs->block + (pos - fs->block_pos), n);
+        done += n;
+    }
+    return done;
 }
 void stream_close(FT_Stream s)
 {
-    delete static_cast<n64vfs::reader*>(s->descriptor.pointer);
+    delete static_cast<font_stream*>(s->descriptor.pointer);
     delete s;
 }
 
-FT_Error open_face(const std::string& path, int index, std::vector<unsigned char>* data, FT_Face* out)
+// Faces are streamed from the VFS (never loaded whole): the font directory
+// holds ~28 MB of fonts and fallback lookups touch many of them.
+FT_Error open_face(const std::string& path, int index, FT_Face* out)
 {
-    std::uint64_t size = 0;
-    if (n64vfs::stat(path, &size) != n64vfs::kind::file) return FT_Err_Cannot_Open_Resource;
-    if (data && size <= k_stream_threshold) {
-        std::string bytes;
-        if (!n64vfs::read(path, bytes)) return FT_Err_Cannot_Open_Resource;
-        data->assign(bytes.begin(), bytes.end());
-        return FT_New_Memory_Face(s_ft, data->data(), (FT_Long)data->size(), index, out);
-    }
     auto r = n64vfs::open_read(path);
     if (!r) return FT_Err_Cannot_Open_Resource;
+    auto* fs = new font_stream();
     auto* st = new FT_StreamRec();
     st->size = (unsigned long)r->size();
-    st->descriptor.pointer = r.release();
+    fs->r = std::move(r);
+    st->descriptor.pointer = fs;
     st->read = stream_read;
     st->close = stream_close;
     FT_Open_Args args{};
@@ -97,7 +113,7 @@ void register_file(const std::string& path)
     int count = 1;
     for (int i = 0; i < count; ++i) {
         FT_Face f = nullptr;
-        if (open_face(path, i, nullptr, &f) != 0) return;
+        if (open_face(path, i, &f) != 0) return;
         count = (int)f->num_faces;
         auto e = std::make_unique<face_entry>();
         e->path = path;
@@ -169,7 +185,7 @@ bool face_entry::load()
 {
     if (ft) return true;
     if (!ft_init()) return false;
-    if (open_face(path, index, &data, &ft) != 0) {
+    if (open_face(path, index, &ft) != 0) {
         std::fprintf(stderr, "[pango] cannot load font %s\n", path.c_str());
         ft = nullptr;
         return false;

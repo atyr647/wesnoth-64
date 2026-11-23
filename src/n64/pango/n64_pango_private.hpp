@@ -37,7 +37,6 @@ struct face_entry {
     cairo_font_face_t* cairo_bold = nullptr;      // synthetic emboldening
     cairo_font_face_t* cairo_oblique = nullptr;   // synthetic slant
     cairo_font_face_t* cairo_bold_oblique = nullptr;
-    std::vector<unsigned char> data;              // file contents (small fonts)
     bool load();
     bool has_glyph(unsigned cp);
 };
