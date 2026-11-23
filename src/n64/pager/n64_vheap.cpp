@@ -211,12 +211,15 @@ size_t usable(void* p) {
 } // namespace
 
 // ---------------------------------------------------------------- public C API
+static size_t s_live;            // bytes in live allocations (usable sizes)
+
 extern "C" void* n64_vmalloc(size_t n) {
     init();
     if (!s_size) return std::malloc(n);
     if (n == 0) n = 1;
     void* p = (n <= kSmallMax) ? small_alloc(static_cast<uint32_t>((n + 7) / 8 - 1))
                                : large_alloc(static_cast<uint32_t>(n));
+    if (p) s_live += usable(p);
     return p;
 }
 
@@ -231,6 +234,7 @@ extern "C" void* n64_vcalloc(size_t n, size_t size) {
 extern "C" void n64_vfree(void* p) {
     if (!p) return;
     if (!in_heap(p)) { std::free(p); return; }
+    s_live -= usable(p);
     uint8_t kind = s_page_kind[page_of(p)];
     if (kind == kLarge) large_free(p);
     else if (kind != kUnused) small_free(p, kind - 1u);
@@ -259,7 +263,7 @@ static void* vmalloc_aligned(size_t n, size_t align) {
     if (!raw) return nullptr;
     uintptr_t a = reinterpret_cast<uintptr_t>(raw);
     uintptr_t aligned = (a + align - 1) & ~(uintptr_t)(align - 1);
-    if (aligned == a) return raw;
+    if (aligned == a) { s_live += usable(raw); return raw; }
     while (aligned - a < kMinBlock) aligned += align;
     Block* b = block_of(raw);
     Block* nb = block_of(reinterpret_cast<void*>(aligned));
@@ -268,11 +272,13 @@ static void* vmalloc_aligned(size_t n, size_t align) {
     set_free(b, lead, b->size_flags & kPrevUse);
     nb->size_flags &= ~kPrevUse;
     bin_insert(b);
+    s_live += usable(reinterpret_cast<void*>(aligned));
     return reinterpret_cast<void*>(aligned);
 }
 
 // ---------------------------------------------------------------- diagnostics
 #include <cstdio>
+#include <n64sys.h>
 extern "C" void n64_vheap_report(size_t failed_request) {
     uint32_t small = 0, large = 0;
     for (uint32_t i = 0; i < s_top; ++i) (s_page_kind[i] == kLarge ? large : small)++;
@@ -291,7 +297,9 @@ extern "C" void n64_vheap_report(size_t failed_request) {
 }
 
 void n64_vheap_progress(uint32_t pages) {
-    std::fprintf(stderr, "[vheap] %u MiB of virtual heap in use\n", (unsigned)(pages * kPage >> 20));
+    std::fprintf(stderr, "[vheap] %u MiB of virtual heap in use (%u KiB live) at %u s\n",
+                 (unsigned)(pages * kPage >> 20), (unsigned)(s_live >> 10),
+                 (unsigned)(get_ticks_ms() / 1000));
 }
 
 // ---------------------------------------------------------------- operator new
