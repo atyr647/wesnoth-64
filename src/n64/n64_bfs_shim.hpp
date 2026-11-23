@@ -145,9 +145,16 @@ public:
         return path(out.empty() ? std::string(".") : out);
     }
 
+    // boost::filesystem v3 semantics (which Wesnoth relies on): appending
+    // never replaces the path, even with an absolute right-hand side --
+    // path("/rom/data") / "/" is "/rom/data/" (std::filesystem would give "/").
     path& operator/=(const path& o) {
-        if (o.is_absolute()) { p_ = o.p_; return *this; }
-        if (!p_.empty() && p_.back() != '/' && !o.p_.empty()) p_ += '/';
+        if (p_.empty()) { p_ = o.p_; return *this; }
+        if (!o.p_.empty() && o.p_[0] == '/') {
+            p_ += (p_.back() == '/') ? o.p_.substr(1) : o.p_;
+            return *this;
+        }
+        if (p_.back() != '/' && !o.p_.empty()) p_ += '/';
         p_ += o.p_;
         return *this;
     }
