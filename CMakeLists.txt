@@ -28,7 +28,9 @@ if(N64_BUILD)
     file(GLOB_RECURSE N64_PLATFORM_SOURCES "src/n64/*.cpp" "src/n64/*.c")
     # app/, smoke/ and pager/ hold separate programs and the paging runtime;
     # they must not be swept into the engine (each defines its own main()).
-    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/(app|smoke|pager)/")
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/(app|smoke|pager|sdl2)/")
+    # SDL 2 and SDL_image built for the console (src/n64/sdl2 + upstream sources).
+    include(${CMAKE_SOURCE_DIR}/cmake/n64_sdl2.cmake)
     # Superseded by the real src/game_launcher.cpp.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_game_launcher\\.cpp$")
     # Superseded by the real src/filesystem.cpp running over n64_vfs.cpp.
@@ -47,6 +49,12 @@ if(N64_BUILD)
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_preferences\\.cpp$")
     # Superseded by the real src/events.cpp (controller input arrives as SDL events).
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_events\\.cpp$")
+    # Superseded by the real SDL 2 port (src/n64/sdl2): the engine's own
+    # video.cpp, draw.cpp, picture.cpp, cursor.cpp, sdl/window.cpp, display and
+    # unit animation code run on it. The old stand-in renderer, GUI and input
+    # layer are no longer part of the engine.
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX
+        "/src/n64/(n64_video_adapter|n64_sdl_wrappers|n64_video|n64_gui|n64_input|n64_input_hotkeys|n64_display|n64_unit_display|n64_combat_display)\\.cpp$")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
@@ -212,7 +220,7 @@ if(N64_BUILD)
         src/units/types.cpp
         src/units/unit.cpp
         src/units/race.cpp
-        # src/units/udisplay.cpp — excluded; replaced by src/n64/n64_unit_display.cpp
+        src/units/udisplay.cpp
         src/units/drawer.cpp
         src/units/helper.cpp
         src/units/frame.cpp
@@ -240,7 +248,7 @@ if(N64_BUILD)
         src/attack_prediction.cpp
         src/about.cpp
         src/achievements.cpp
-        # src/picture.cpp — excluded; image namespace replaced by n64_sdl_wrappers.cpp
+        src/picture.cpp
         src/minimap.cpp
         src/persist_context.cpp
         src/persist_manager.cpp
@@ -365,7 +373,8 @@ if(N64_BUILD)
 
         # --- Additional modules discovered during integration ---
         src/map_settings.cpp
-        # src/floating_label.cpp — excluded; replaced by n64_stubs.cpp floating_label
+        src/floating_label.cpp
+        src/floating_textbox.cpp
         src/utils/parse_network_address.cpp
 
         # --- GUI2 framework (widget hierarchy needed for modal_dialog + TLD registration) ---
@@ -400,7 +409,10 @@ if(N64_BUILD)
 
         # --- SDL wrappers (rect/texture/surface compile via shim; events/draw replaced by N64) ---
         # src/events.cpp — excluded; replaced by src/n64/n64_events.cpp
-        # src/draw.cpp — excluded; replaced by src/n64/n64_sdl_wrappers.cpp
+        src/draw.cpp
+        src/video.cpp
+        src/cursor.cpp
+        src/sdl/window.cpp
         src/sdl/rect.cpp
         src/sdl/texture.cpp
         src/sdl/surface.cpp
@@ -719,6 +731,7 @@ if(N64_BUILD)
     target_include_directories(wesnoth_n64 PRIVATE
         src/
         src/n64/
+        ${N64_SDL2_INCLUDE_DIR}       # real SDL 2 / SDL_image headers first
         src/n64/sdl2_stubs/
         src/modules/lua/
         ${N64_INST}/include
@@ -735,7 +748,7 @@ if(N64_BUILD)
     # Inject shims: SDL → n64_sdl_shim, Boost → n64_boost_shim, plus Pango/Cairo/threading/network/mixer
     # Only apply to C++ sources; C sources (like n64_libgcc.c) cannot consume C++ headers.
     target_compile_options(wesnoth_n64 PRIVATE
-        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_shim.hpp>"
+        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_engine_prelude.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_font_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp>"
@@ -785,9 +798,9 @@ if(N64_BUILD)
     target_compile_definitions(wesnoth_n64 PRIVATE N64_PAGED=1)
     # Resident code must be real object code (not LTO IR), or its sections
     # would not carry the file names cmake/n64_paged.ld selects on.
-    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp)
+    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp)
     set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
-        src/n64/pager/n64_vheap.cpp
+        src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         PROPERTIES COMPILE_OPTIONS "-fno-lto")
     # Lua's default allocator (luaL_newstate -> l_alloc in lauxlib.c) uses the
     # swappable heap too.
@@ -840,6 +853,8 @@ if(N64_BUILD)
     # Link libdragon + zlib (for save compression)
     target_link_libraries(wesnoth_n64 PRIVATE
         wesnoth_n64_lua
+        n64_sdl2_image
+        n64_sdl2
         wesnoth_n64_stubs
         ${N64_LIBDRAGON_PAGED}
         ${N64_INST}/mips64-elf/lib/libdragonsys.a

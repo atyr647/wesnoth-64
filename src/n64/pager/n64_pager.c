@@ -59,9 +59,11 @@ __attribute__((weak)) uint32_t n64_pager_frames_requested = 160;   // 2.5 MiB
 #define SC64_V2_IDENTIFIER  0x53437632u
 #define SC64_CMD_CONFIG_SET 'C'
 #define SC64_CFG_ROM_WRITE_ENABLE 1u
-// Swap: cartridge SDRAM from 32 MiB up to just below the IS-Viewer window.
-#define SWAP_CART_BASE      0x12000000u      /* ROM must end below 32 MiB */
+// Swap: cartridge SDRAM from the end of the ROM image up to just below the
+// IS-Viewer window. The ROM's last TOC entry is an end marker ("rom.end",
+// added by n64_create_paged_rom), so the swap never overlaps ROM data.
 #define SWAP_CART_END       0x13FC0000u
+static uint32_t s_swap_base;
 
 static uint16_t s_pte[MAX_PAGES];            // page -> frame (NO_FRAME if absent)
 static uint8_t  s_flags[MAX_PAGES];
@@ -83,7 +85,7 @@ static inline int32_t va_page(uint32_t va) {
     if (va >= VH_BASE && va < VH_BASE + s_nheap * PG_SIZE) return (int32_t)(s_ncode + ((va - VH_BASE) >> PG_SHIFT));
     return -1;
 }
-static inline uint32_t swap_addr(uint32_t page) { return SWAP_CART_BASE + (page - s_ncode) * PG_SIZE; }
+static inline uint32_t swap_addr(uint32_t page) { return s_swap_base + (page - s_ncode) * PG_SIZE; }
 
 // ---------------------------------------------------------------------------
 // TLB helpers
@@ -252,6 +254,33 @@ static int emulate_rdhwr(exception_t* ex) {
     return 1;
 }
 
+// A kernel address held zero-extended in a 64-bit register (0x00000000_8xxxxxxx
+// instead of 0xFFFFFFFF_8xxxxxxx) is an xuseg address under SR.KX=1 and
+// faults. GCC-generated o64 code never does this, but a few paths in the
+// runtime libraries can (see tools/patch-n64-libgcc.sh). Repair the base
+// register of the faulting load/store and retry; log where it happened.
+static int fix_zero_extended_base(exception_t* ex) {
+    uint64_t bad;
+    asm volatile("dmfc0 %0,$8" : "=r"(bad));
+    if ((bad >> 32) != 0 || (uint32_t)bad < 0x80000000u) return 0;
+    uint32_t pc = ex->regs->epc + ((ex->regs->cr & (1u << 31)) ? 4 : 0);
+    if (pc < 0x80000000u || pc >= 0xC0000000u + s_ncode * PG_SIZE) return 0;
+    uint32_t insn = *(volatile uint32_t*)pc;
+    uint32_t op = insn >> 26;
+    if (!(op >= 0x20 || op == 0x1A || op == 0x1B)) return 0;      // loads/stores
+    uint32_t base = (insn >> 21) & 31;
+    uint64_t v = ex->regs->gpr[base];
+    if ((v >> 32) != 0 || !(v & 0x80000000u)) return 0;
+    ex->regs->gpr[base] = (uint64_t)(int64_t)(int32_t)(uint32_t)v;
+    static int logged;
+    if (logged < 16) {
+        ++logged;
+        debugf("[pager] zero-extended pointer in $%lu at PC %08lx (ra %08lx): repaired\n",
+               (unsigned long)base, (unsigned long)pc, (unsigned long)(uint32_t)ex->regs->gpr[31]);
+    }
+    return 1;
+}
+
 static void pager_exception(exception_t* ex) {
     uint32_t code = C0_GET_CAUSE_EXC_CODE(ex->regs->cr);
     if (code == EXCEPTION_CODE_RESERVED_INSTRUCTION && emulate_rdhwr(ex)) return;
@@ -273,6 +302,7 @@ static void pager_exception(exception_t* ex) {
             tlb_set_pair((uint32_t)page, 1);
             return;                              // retry the faulting instruction
         }
+        if (code != EXCEPTION_CODE_TLB_MODIFICATION && fix_zero_extended_base(ex)) return;
     }
 unhandled:
     if (s_prev_handler) s_prev_handler(ex);
@@ -290,8 +320,10 @@ static void pager_init(void) {
     }
 
     // The swappable heap needs a SummerCart64 with SDRAM writes enabled.
-    if (sc64_enable_sdram_writes()) {
-        s_nheap = (SWAP_CART_END - SWAP_CART_BASE) / PG_SIZE;
+    uint32_t rom_end = rompak_search_ext(".end");
+    s_swap_base = rom_end ? ((rom_end + 64 + 0xFFFFu) & ~0xFFFFu) : 0;
+    if (s_swap_base && s_swap_base < SWAP_CART_END && sc64_enable_sdram_writes()) {
+        s_nheap = (SWAP_CART_END - s_swap_base) / PG_SIZE;
         if (s_ncode + s_nheap > MAX_PAGES) s_nheap = MAX_PAGES - s_ncode;
         s_nheap &= ~1u;
     }

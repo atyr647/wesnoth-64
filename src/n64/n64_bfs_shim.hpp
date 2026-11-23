@@ -508,18 +508,17 @@ private:
 // -----------------------------------------------------------------------
 class ifstream : public std::istream {
 public:
-    ifstream() : std::istream(&buf_) { setstate(std::ios_base::failbit); }
-    explicit ifstream(const path& p, std::ios_base::openmode = std::ios_base::in) : std::istream(&buf_) { open(p); }
+    ifstream() : std::istream(nullptr) { setstate(std::ios_base::failbit); }
+    explicit ifstream(const path& p, std::ios_base::openmode = std::ios_base::in) : std::istream(nullptr) { open(p); }
     void open(const path& p, std::ios_base::openmode = std::ios_base::in) {
-        std::string data;
-        if (n64vfs::read(p.string(), data)) { buf_.str(std::move(data)); open_ = true; clear(); }
+        auto r = n64vfs::open_read(p.string());
+        if (r) { buf_ = std::make_unique<n64vfs::istreambuf>(std::move(r)); rdbuf(buf_.get()); clear(); }
         else setstate(std::ios_base::failbit);
     }
-    bool is_open() const { return open_; }
-    void close() { open_ = false; }
+    bool is_open() const { return static_cast<bool>(buf_); }
+    void close() { rdbuf(nullptr); buf_.reset(); }
 private:
-    std::stringbuf buf_;
-    bool open_ = false;
+    std::unique_ptr<n64vfs::istreambuf> buf_;
 };
 
 class ofstream : public std::ostream {
@@ -554,19 +553,21 @@ namespace iostreams {
 
 #define BOOST_IOSTREAMS_FAILURE std::ios_base::failure
 
+template<class Device> class stream;
+
 class file_descriptor_source {
 public:
     file_descriptor_source() = default;
     file_descriptor_source(const filesystem::path& p, std::ios_base::openmode = std::ios_base::in) {
-        auto data = std::make_shared<std::string>();
-        if (!n64vfs::read(p.string(), *data))
-            throw BOOST_IOSTREAMS_FAILURE("cannot open " + p.string());
-        data_ = std::move(data);
+        auto r = n64vfs::open_read(p.string());
+        if (!r) throw BOOST_IOSTREAMS_FAILURE("cannot open " + p.string());
+        reader_ = std::shared_ptr<n64vfs::reader>(std::move(r));
     }
-    bool is_open() const { return static_cast<bool>(data_); }
-    const std::shared_ptr<std::string>& data() const { return data_; }
+    bool is_open() const { return static_cast<bool>(reader_); }
+    // The stream built from this device takes the reader (devices are copied).
 private:
-    std::shared_ptr<std::string> data_;
+    std::shared_ptr<n64vfs::reader> reader_;
+    friend class stream<file_descriptor_source>;
 };
 
 class file_descriptor_sink {
@@ -585,17 +586,30 @@ private:
     bool append_ = false;
 };
 
-template<class Device> class stream;
 
 template<> class stream<file_descriptor_source> : public std::istream {
 public:
     stream(const file_descriptor_source& d, std::streamsize = 0, std::streamsize = 0)
-        : std::istream(&buf_), data_(d.data()) {
-        if (data_) buf_.str(*data_); else setstate(std::ios_base::failbit);
+        : std::istream(nullptr), keep_(d.reader_) {
+        if (keep_) {
+            buf_ = std::make_unique<n64vfs::istreambuf>(std::make_unique<shared_reader>(keep_));
+            rdbuf(buf_.get());
+        } else {
+            setstate(std::ios_base::failbit);
+        }
     }
 private:
-    std::stringbuf buf_;
-    std::shared_ptr<std::string> data_;
+    // Forwards to the device's reader (the device keeps it alive too).
+    struct shared_reader : n64vfs::reader {
+        explicit shared_reader(std::shared_ptr<n64vfs::reader> r) : r_(std::move(r)) {}
+        std::size_t read(void* d, std::size_t n) override { return r_->read(d, n); }
+        bool seek(std::uint64_t pos) override { return r_->seek(pos); }
+        std::uint64_t tell() const override { return r_->tell(); }
+        std::uint64_t size() const override { return r_->size(); }
+        std::shared_ptr<n64vfs::reader> r_;
+    };
+    std::shared_ptr<n64vfs::reader> keep_;
+    std::unique_ptr<n64vfs::istreambuf> buf_;
 };
 
 template<> class stream<file_descriptor_sink> : public std::ostream {

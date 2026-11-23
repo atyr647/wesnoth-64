@@ -1,5 +1,5 @@
 diff --git a/ares/n64/cartridge/cartridge.cpp b/ares/n64/cartridge/cartridge.cpp
-index e461e52..cf30d58 100644
+index e461e52..249100a 100644
 --- a/ares/n64/cartridge/cartridge.cpp
 +++ b/ares/n64/cartridge/cartridge.cpp
 @@ -8,6 +8,7 @@ Cartridge& cartridge = cartridgeSlot.cartridge;
@@ -26,18 +26,21 @@ index e461e52..cf30d58 100644
    debugger.unload(node);
    rom.reset();
    ram.reset();
-@@ -104,6 +107,9 @@ auto Cartridge::power(bool reset) -> void {
+@@ -104,6 +107,12 @@ auto Cartridge::power(bool reset) -> void {
    flash.power(reset);
    isviewer.ram.fill(0);
    rtc.power(reset);
 +  sc64.unlocked = 0;
 +  sc64.romWritable = 0;
 +  sc64.keyStage = 0;
++  sc64.sdInitialized = 0;
++  sc64.sdByteswap = 0;
++  sc64.sdSector = 0;
  }
  
  }
 diff --git a/ares/n64/cartridge/cartridge.hpp b/ares/n64/cartridge/cartridge.hpp
-index b3cbc28..5ca35ac 100644
+index b3cbc28..3a5bb2c 100644
 --- a/ares/n64/cartridge/cartridge.hpp
 +++ b/ares/n64/cartridge/cartridge.hpp
 @@ -12,7 +12,7 @@ struct Cartridge {
@@ -49,7 +52,7 @@ index b3cbc28..5ca35ac 100644
        return true;
      }
    } romDevice{*this};
-@@ -103,6 +103,23 @@ struct Cartridge {
+@@ -103,6 +103,33 @@ struct Cartridge {
      auto siliconHalf(u32 halfIndex) const -> u16;
    } flash;
  
@@ -61,8 +64,18 @@ index b3cbc28..5ca35ac 100644
 +    u32 keyStage = 0;
 +    n1 unlocked;
 +    n1 romWritable;
++    // SD card (image file named by the SC64_SD_IMAGE environment variable)
++    std::array<u8, 8192> buffer{};
++    FILE* sdFile = nullptr;
++    u64 sdSectors = 0;
++    u32 sdSector = 0;
++    n1 sdInitialized;
++    n1 sdByteswap;
 +
 +    auto piAddress(u32 address, PIDeviceTiming timing) -> bool override;
++    auto sdOpen() -> bool;
++    auto sdTransfer(bool write, u32 address, u32 count) -> bool;
++    auto byteAt(u32 address) -> u8*;
 +    auto piReadHalf(PIDeviceTiming timing) -> maybe<u16> override;
 +    auto piWriteHalf(u16 data, PIDeviceTiming timing) -> void override;
 +    auto readRegister(u32 reg) -> u32;
@@ -75,19 +88,27 @@ index b3cbc28..5ca35ac 100644
      Node::Debugger::Tracer::Notification tracer;
 diff --git a/ares/n64/cartridge/sc64.cpp b/ares/n64/cartridge/sc64.cpp
 new file mode 100644
-index 0000000..0005947
+index 0000000..bce2c53
 --- /dev/null
 +++ b/ares/n64/cartridge/sc64.cpp
-@@ -0,0 +1,72 @@
-+// SummerCart64 emulation (registers and writable SDRAM), enough for software
-+// that pages memory to the cartridge: key unlock, "SCv2" identifier and
-+// CONFIG_SET(ROM_WRITE_ENABLE). Enabling writes extends the ROM buffer to the
-+// SC64's 64 MiB of SDRAM (less the IS-Viewer window at 0x13ff'0000).
+@@ -0,0 +1,169 @@
++// SummerCart64 emulation: enough for homebrew that uses the cartridge's
++// SDRAM as writable memory and its SD card as storage.
++//
++//  - registers at 0x1fff'0000 (STATUS/COMMAND, DATA0, DATA1, IDENTIFIER, KEY),
++//    unlocked with the "_UNL" "OCK_" key sequence, identifier "SCv2";
++//  - CONFIG_SET/GET: ROM_WRITE_ENABLE (writable SDRAM; enabling it extends the
++//    ROM buffer to 64 MiB less the IS-Viewer window at 0x13ff'0000), other
++//    options read as 0;
++//  - SD card: SD_OP (init, deinit, status, info, byteswap), SD_SECTOR_SET,
++//    SD_READ / SD_WRITE to the 8 KiB data buffer at 0x1ffe'0000 or to SDRAM.
++//    The card is a raw disk image named by the SC64_SD_IMAGE environment
++//    variable (writes go to the file).
 +
 +auto Cartridge::SC64::piAddress(u32 address, PIDeviceTiming) -> bool {
-+  if(address < 0x1fff'0000 || address >= 0x1fff'0020) return false;
-+  piAddr = address & 0x1f;
-+  return true;
++  if(address >= 0x1fff'0000 && address < 0x1fff'0020) { piAddr = address; return true; }
++  if(address >= 0x1ffe'0000 && address < 0x1ffe'2000) { piAddr = address; return true; }
++  return false;
 +}
 +
 +auto Cartridge::SC64::readRegister(u32 reg) -> u32 {
@@ -100,9 +121,60 @@ index 0000000..0005947
 +  return 0;
 +}
 +
++auto Cartridge::SC64::sdOpen() -> bool {
++  if(sdFile) return true;
++  const char* path = getenv("SC64_SD_IMAGE");
++  if(!path || !*path) return false;
++  sdFile = fopen(path, "r+b");
++  if(!sdFile) sdFile = fopen(path, "rb");
++  if(!sdFile) return false;
++  fseeko(sdFile, 0, SEEK_END);
++  sdSectors = u64(ftello(sdFile)) / 512;
++  return true;
++}
++
++// Byte of cartridge address space the SD card can transfer to/from.
++auto Cartridge::SC64::byteAt(u32 address) -> u8* {
++  if(address >= 0x1ffe'0000 && address < 0x1ffe'2000) return &buffer[address - 0x1ffe'0000];
++  if(address >= 0x1000'0000 && address < 0x1400'0000) {
++    u32 offset = address - 0x1000'0000;
++    if(offset >= self.rom.size) return nullptr;
++    return (u8*)self.rom.data + (offset ^ 3);       // ROM words are stored host-endian
++  }
++  return nullptr;
++}
++
++auto Cartridge::SC64::sdTransfer(bool write, u32 address, u32 count) -> bool {
++  if(!sdFile || !sdInitialized) return false;
++  if(u64(sdSector) + count > sdSectors) return false;
++  u8 sector[512];
++  for(u32 n = 0; n < count; n++) {
++    fseeko(sdFile, off_t(u64(sdSector) * 512), SEEK_SET);
++    if(!write) {
++      if(fread(sector, 1, 512, sdFile) != 512) return false;
++      for(u32 i = 0; i < 512; i++) {
++        u8* p = byteAt(address + n * 512 + (sdByteswap ? (i ^ 1) : i));
++        if(!p) return false;
++        *p = sector[i];
++      }
++    } else {
++      for(u32 i = 0; i < 512; i++) {
++        u8* p = byteAt(address + n * 512 + i);
++        if(!p) return false;
++        sector[i] = *p;
++      }
++      if(fwrite(sector, 1, 512, sdFile) != 512) return false;
++    }
++    sdSector++;
++  }
++  if(write) fflush(sdFile);
++  return true;
++}
++
 +auto Cartridge::SC64::writeRegister(u32 reg, u32 value) -> void {
 +  if(reg == 0x10) {                                // KEY
 +    if(value == 0) { keyStage = 0; unlocked = 0; return; }
++    if(value == 0xffff'ffff) { keyStage = 0; unlocked = 0; return; }
 +    if(keyStage == 0 && value == 0x5f55'4e4c) { keyStage = 1; return; }
 +    if(keyStage == 1 && value == 0x4f43'4b5f) { keyStage = 2; unlocked = 1; return; }
 +    keyStage = 0;
@@ -111,36 +183,74 @@ index 0000000..0005947
 +  if(!unlocked) return;
 +  if(reg == 0x04) { data0 = value; return; }
 +  if(reg == 0x08) { data1 = value; return; }
-+  if(reg == 0x00) {                                // command
-+    status = 0;
-+    if((value & 0xff) == 'C' && data0 == 1) {      // CONFIG_SET ROM_WRITE_ENABLE
++  if(reg != 0x00) return;
++
++  status = 0;
++  bool ok = true;
++  switch(value & 0xff) {
++  case 'C':                                        // CONFIG_SET
++    if(data0 == 1) {                               // ROM_WRITE_ENABLE
 +      u32 previous = romWritable;
 +      romWritable = data1 != 0;
 +      if(romWritable) self.extendRomToSdram();
-+      data0 = 0;
 +      data1 = previous;
-+      return;
++    } else {
++      data1 = 0;
 +    }
-+    if((value & 0xff) == 'c' && data0 == 1) {      // CONFIG_GET ROM_WRITE_ENABLE
-+      data0 = 0;
-+      data1 = romWritable;
-+      return;
++    break;
++  case 'c':                                        // CONFIG_GET
++    data1 = (data0 == 1) ? u32(romWritable) : 0;
++    break;
++  case 'i':                                        // SD_OP
++    switch(data1) {
++    case 0: sdInitialized = 0; data1 = 0; break;   // deinit
++    case 1: ok = sdOpen(); sdInitialized = ok; data1 = 0; break;
++    case 2: data1 = (sdOpen() ? 1 : 0) | (sdInitialized ? 2 : 0); break;
++    case 3: data1 = 0; break;                      // card info (CSD/CID): not provided
++    case 4: sdByteswap = 1; data1 = 0; break;
++    case 5: sdByteswap = 0; data1 = 0; break;
++    default: ok = false;
 +    }
-+    status = 1u << 30;                             // unsupported: error flag
++    break;
++  case 'I':                                        // SD_SECTOR_SET
++    sdSector = data0;
++    break;
++  case 's':                                        // SD_READ (to buffer or SDRAM)
++    ok = sdTransfer(false, data0, data1);
++    break;
++  case 'S':                                        // SD_WRITE (from buffer or SDRAM)
++    ok = sdTransfer(true, data0, data1);
++    break;
++  default:
++    ok = false;
 +  }
++  if(!ok) status = 1u << 30;                       // error flag
 +}
 +
 +auto Cartridge::SC64::piReadHalf(PIDeviceTiming) -> maybe<u16> {
-+  u32 word = readRegister(piAddr & ~3u);
-+  u16 half = (piAddr & 2) ? u16(word) : u16(word >> 16);
++  u16 half;
++  if(piAddr >= 0x1ffe'0000 && piAddr < 0x1ffe'2000) {
++    u32 o = piAddr - 0x1ffe'0000;
++    half = u16(buffer[o]) << 8 | buffer[o + 1];
++  } else {
++    u32 word = readRegister(piAddr & 0x1c);
++    half = (piAddr & 2) ? u16(word) : u16(word >> 16);
++  }
 +  piAddr += 2;
 +  return half;
 +}
 +
 +auto Cartridge::SC64::piWriteHalf(u16 data, PIDeviceTiming) -> void {
 +  pi.writeForceFinish();
-+  if(!(piAddr & 2)) latch = data;
-+  else writeRegister(piAddr & ~3u, u32(latch) << 16 | data);
++  if(piAddr >= 0x1ffe'0000 && piAddr < 0x1ffe'2000) {
++    u32 o = piAddr - 0x1ffe'0000;
++    buffer[o] = data >> 8;
++    buffer[o + 1] = data;
++  } else if(!(piAddr & 2)) {
++    latch = data;
++  } else {
++    writeRegister(piAddr & 0x1c, u32(latch) << 16 | data);
++  }
 +  piAddr += 2;
 +}
 +

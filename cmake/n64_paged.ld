@@ -47,6 +47,7 @@ SECTIONS {
         *n64_pager.c.obj(.text .text.*)
         *n64_libgcc.c.obj(.text .text.*)
         *n64_vheap.cpp.obj(.text .text.*)
+        *n64_throwlog.cpp.obj(.text .text.*)
         /* libstdc++'s weak template functions, wherever they were emitted
            (generated into the build directory by CMakeLists.txt) */
         INCLUDE n64_resident_weak.ld
@@ -72,6 +73,7 @@ SECTIONS {
         *n64_pager.c.obj(.rdata .rodata .rodata.*)
         *n64_libgcc.c.obj(.rdata .rodata .rodata.*)
         *n64_vheap.cpp.obj(.rdata .rodata .rodata.*)
+        *n64_throwlog.cpp.obj(.rdata .rodata .rodata.*)
         KEEP(*(keep.rodata.*))
         . = ALIGN(8);
     } :main

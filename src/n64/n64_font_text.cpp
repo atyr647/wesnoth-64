@@ -118,19 +118,11 @@ pango_text::pango_text()
 // Rendering
 // -----------------------------------------------------------------------
 texture pango_text::render_and_get_texture() {
-    // On N64, text rendering happens at draw time via n64_draw_text.
-    // We return a dummy texture with the correct dimensions.
+    // Temporary: blank texture of the measured size (FreeType renderer pending).
     int w = 0, h = 0;
     measure_text(text_, maximum_width_, maximum_height_, &w, &h, nullptr);
-
-    texture t;
-    // Create a shim texture with correct dimensions
-    auto* st = SDL_CreateTexture(nullptr, 0, 0, w > 0 ? w : 1, h > 0 ? h : GLYPH_H);
-    if (st) {
-        st->w = w > 0 ? w : 1;
-        st->h = h > 0 ? h : GLYPH_H;
-    }
-    return t;
+    surface s(w > 0 ? w : 1, h > 0 ? h : GLYPH_H);
+    return texture(s);
 }
 
 texture pango_text::render_texture(const rect& viewport) {

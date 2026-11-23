@@ -91,6 +91,5 @@ static constexpr size_t N64_POOL_FRAMEBUF    =  307200;      // 320*240*2*2 (dou
 // Compile-time guard: ensure N64-incompatible headers are not included
 // -----------------------------------------------------------------------
 #ifdef N64_BUILD
-#  define SDL_h_                    // block SDL.h
 #  define BOOST_FILESYSTEM_HPP      // block boost/filesystem.hpp
 #endif

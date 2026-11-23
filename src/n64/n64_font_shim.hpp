@@ -294,7 +294,10 @@ enum cairo_antialias_t {
     CAIRO_ANTIALIAS_DEFAULT = 0,
     CAIRO_ANTIALIAS_NONE,
     CAIRO_ANTIALIAS_GRAY,
-    CAIRO_ANTIALIAS_SUBPIXEL
+    CAIRO_ANTIALIAS_SUBPIXEL,
+    CAIRO_ANTIALIAS_FAST,
+    CAIRO_ANTIALIAS_GOOD,
+    CAIRO_ANTIALIAS_BEST
 };
 
 enum cairo_hint_style_t {
@@ -323,6 +326,8 @@ inline void cairo_font_options_destroy(cairo_font_options_t*) {}
 inline void cairo_font_options_set_hint_style(cairo_font_options_t*, cairo_hint_style_t) {}
 inline void cairo_font_options_set_hint_metrics(cairo_font_options_t*, cairo_hint_metrics_t) {}
 inline void cairo_font_options_set_antialias(cairo_font_options_t*, cairo_antialias_t) {}
+struct _cairo;
+inline void cairo_set_antialias(struct _cairo*, cairo_antialias_t) {}
 
 // Cairo surface functions
 inline int cairo_format_stride_for_width(cairo_format_t, int width) { return width * 4; }

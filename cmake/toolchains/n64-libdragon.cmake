@@ -140,6 +140,7 @@ function(n64_create_paged_rom target)
                 --align 256 ${BOOT}
                 --align 16  ${PAGED}
                 ${ROMFS_ARGS}
+                --align 16  ${CMAKE_SOURCE_DIR}/cmake/rom.end
         COMMENT "Creating demand-paged N64 ROM: ${target}.z64"
         VERBATIM
     )

@@ -10,10 +10,9 @@
 
 #include "n64_platform.hpp"
 #include "n64_memory.hpp"
-#include "n64_video.hpp"
 #include "n64_audio.hpp"
-#include "n64_input.hpp"
 #include "n64_romfs.hpp"
+#include "n64_vfs.hpp"
 #include "netlib_adapter.hpp"
 
 #ifdef N64_BUILD
@@ -33,6 +32,19 @@
 // Frame pool for the demand pager (src/n64/pager): 16 KiB frames shared by
 // paged code and the swappable heap. 240 frames = 3.75 MiB of RAM.
 extern "C" uint32_t n64_pager_frames_requested = 240;
+
+#  ifdef N64_PAGED
+extern "C" void* n64_vmalloc(size_t);
+extern "C" void* n64_vrealloc(void*, size_t);
+extern "C" void  n64_vfree(void*);
+static void* n64_vcalloc(size_t n, size_t size) {
+    const size_t bytes = n * size;
+    if (size && bytes / size != n) return nullptr;
+    void* p = n64_vmalloc(bytes);
+    if (p) std::memset(p, 0, bytes);
+    return p;
+}
+#  endif
 
 // Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
 int wesnoth_main(int argc, char** argv);
@@ -75,20 +87,33 @@ int main() {
     // --- Phase 1: Memory pools ---
     n64_memory_init();
 
-    // --- Phase 2: ROM filesystem ---
-    if (!n64_romfs_init()) {
-        N64_LOG("FATAL: ROM filesystem corrupt");
+    // --- Phase 2: game data ---
+    // The SummerCart64's SD card holds the unmodified data tree (directory
+    // "wesnoth") and the user data ("wesnoth-userdata"); without a card the
+    // cartridge ROM's data tree is used and user data lives in RAM.
+    const bool rom_ok = n64_romfs_init();
+    if (n64vfs::init()) {
+        N64_LOG("Game data: SD card (sd:/wesnoth), user data: sd:/wesnoth-userdata");
+    } else if (rom_ok) {
+        N64_LOG("Game data: cartridge ROM (no SD card with a 'wesnoth' directory)");
+    } else {
+        N64_LOG("FATAL: no game data (no SD card 'wesnoth' directory, no ROM filesystem)");
         while(1) {}
     }
 
-    // --- Phase 3: Video ---
-    n64_video_init();
+    // --- Phase 3: SDL ---
+    // Video and controller input belong to SDL's N64 driver (src/n64/sdl2),
+    // set up when the engine initialises SDL. SDL's own allocations
+    // (surfaces, textures, decoded images) go to the swappable heap.
+#  ifdef N64_PAGED
+    SDL_SetMemoryFunctions(n64_vmalloc, n64_vcalloc, n64_vrealloc, n64_vfree);
+#  endif
+    // Until the RDP renderer lands, SDL's software renderer is the only one.
+    // The engine asks for an accelerated renderer; name the driver instead.
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
     // --- Phase 4: Audio ---
     n64_audio_init();
-
-    // --- Phase 5: Input ---
-    n64_input_init();
 
     // --- Phase 6: hand over to Wesnoth's own main() (src/wesnoth.cpp) ---
     // Everything from here on is the unmodified engine start-up path:
