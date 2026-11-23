@@ -508,15 +508,17 @@ private:
 // -----------------------------------------------------------------------
 class ifstream : public std::istream {
 public:
-    ifstream() : std::istream(nullptr) { setstate(std::ios_base::failbit); }
-    explicit ifstream(const path& p, std::ios_base::openmode = std::ios_base::in) : std::istream(nullptr) { open(p); }
+    // Like std::ifstream, a closed stream has a (empty) buffer, so its state
+    // is good until it is read; clear() never adds badbit.
+    ifstream() : std::istream(nullptr), buf_(std::make_unique<n64vfs::istreambuf>(nullptr)) { rdbuf(buf_.get()); }
+    explicit ifstream(const path& p, std::ios_base::openmode m = std::ios_base::in) : ifstream() { open(p, m); }
     void open(const path& p, std::ios_base::openmode = std::ios_base::in) {
         auto r = n64vfs::open_read(p.string());
         if (r) { buf_ = std::make_unique<n64vfs::istreambuf>(std::move(r)); rdbuf(buf_.get()); clear(); }
         else setstate(std::ios_base::failbit);
     }
-    bool is_open() const { return static_cast<bool>(buf_); }
-    void close() { rdbuf(nullptr); buf_.reset(); }
+    bool is_open() const { return buf_ && buf_->is_open(); }
+    void close() { buf_ = std::make_unique<n64vfs::istreambuf>(nullptr); rdbuf(buf_.get()); }
 private:
     std::unique_ptr<n64vfs::istreambuf> buf_;
 };
@@ -591,12 +593,10 @@ template<> class stream<file_descriptor_source> : public std::istream {
 public:
     stream(const file_descriptor_source& d, std::streamsize = 0, std::streamsize = 0)
         : std::istream(nullptr), keep_(d.reader_) {
-        if (keep_) {
-            buf_ = std::make_unique<n64vfs::istreambuf>(std::make_unique<shared_reader>(keep_));
-            rdbuf(buf_.get());
-        } else {
-            setstate(std::ios_base::failbit);
-        }
+        buf_ = std::make_unique<n64vfs::istreambuf>(
+            keep_ ? std::make_unique<shared_reader>(keep_) : std::unique_ptr<n64vfs::reader>());
+        rdbuf(buf_.get());
+        if (!keep_) setstate(std::ios_base::failbit);
     }
 private:
     // Forwards to the device's reader (the device keeps it alive too).

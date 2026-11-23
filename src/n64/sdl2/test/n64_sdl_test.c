@@ -40,7 +40,7 @@ int main(void)
         return 1;
     }
     SDL_Window* win = SDL_CreateWindow("test", 0, 0, 640, 480, 0);
-    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE | SDL_RENDERER_TARGETTEXTURE);
+    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
     SDL_RendererInfo info;
     SDL_GetRendererInfo(ren, &info);
     fprintf(stderr, "[sdltest] window %p renderer %s (%s)\n", (void*)win, info.name, SDL_GetCurrentVideoDriver());

@@ -122,9 +122,6 @@ int main() {
 #  ifdef N64_PAGED
     SDL_SetMemoryFunctions(n64_vmalloc, n64_vcalloc, n64_vrealloc, n64_vfree);
 #  endif
-    // Until the RDP renderer lands, SDL's software renderer is the only one.
-    // The engine asks for an accelerated renderer; name the driver instead.
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
     // --- Phase 4: Audio ---
     n64_audio_init();

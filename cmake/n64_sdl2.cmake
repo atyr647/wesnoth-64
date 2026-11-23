@@ -54,6 +54,7 @@ set(N64_SDL2_SOURCES
     ${_S}/video/yuv2rgb/yuv_rgb_std.c
     ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64video.c
     ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64timer.c
+    ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64render.c
 )
 file(GLOB _sdl_glob
     ${_S}/events/*.c ${_S}/stdlib/*.c ${_S}/render/software/*.c ${_S}/video/*.c)

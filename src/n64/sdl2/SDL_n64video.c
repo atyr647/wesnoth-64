@@ -210,6 +210,26 @@ static void draw_cursor(uint16_t *dst, int stride_px)
     }
 }
 
+/* For the RDP renderer (SDL_n64render.c): the cursor to draw on the frame. */
+void SDL_N64_GetCursor(SDL_Surface **image, int *hot_x, int *hot_y, int *x, int *y)
+{
+    SDL_Mouse *mouse = SDL_GetMouse();
+    *image = NULL;
+    if (mouse->cursor_shown && mouse->cur_cursor && mouse->cur_cursor->driverdata) {
+        N64Cursor *data = (N64Cursor *)mouse->cur_cursor->driverdata;
+        *image = data->image;
+        *hot_x = data->hot_x;
+        *hot_y = data->hot_y;
+    }
+    *x = s_mouse_x;
+    *y = s_mouse_y;
+}
+
+void SDL_N64_TakeDisplay(void)
+{
+    output_init();
+}
+
 static void present(void)
 {
     surface_t *disp = display_get();

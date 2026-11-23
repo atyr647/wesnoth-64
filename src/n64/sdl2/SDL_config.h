@@ -5,6 +5,7 @@
  * is built unmodified; the platform-specific parts live next to this file:
  *   SDL_n64video.c  -- video driver: one 640x480 window shown at 640x240
  *                      progressive, controller input as mouse + keyboard
+ *   SDL_n64render.c -- render driver on the RDP (640x480 drawn at 640x240)
  *   SDL_n64timer.c  -- tick counter and SDL_AddTimer (run from event pumping:
  *                      there are no threads on this platform)
  */
@@ -132,6 +133,7 @@
 #define SDL_THREADS_DISABLED 1
 #define SDL_VIDEO_DRIVER_DUMMY 1    /* SDL_n64video.c (registered as DUMMY_bootstrap) */
 #define SDL_VIDEO_RENDER_SW 1
+#define SDL_VIDEO_RENDER_PS2 1      /* SDL_n64render.c: RDP renderer (registered as PS2_RenderDriver) */
 #define SDL_FILESYSTEM_DUMMY 1
 #define SDL_POWER_DISABLED 1
 
