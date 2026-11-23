@@ -927,8 +927,12 @@ SDL_RenderDriver PS2_RenderDriver = {
     {
         "n64",
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_TARGETTEXTURE,
-        1,
-        { SDL_PIXELFORMAT_RGBA8888 },
+        4,
+        /* Pixels are converted when stored, so these are all native: in
+           particular the engine's ARGB8888 render targets must not get a
+           proxy "native" texture (SDL would then report the proxy as the
+           current target). */
+        { SDL_PIXELFORMAT_ARGB8888, SDL_PIXELFORMAT_RGBA8888, SDL_PIXELFORMAT_ABGR8888, SDL_PIXELFORMAT_BGRA8888 },
         2048,
         2048 }
 };

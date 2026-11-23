@@ -28,16 +28,20 @@ std::string egettext(const char* msgid) {
     return msgid ? msgid : "";
 }
 
+// sgettext: an untranslated "context^text" message is shown as "text"
+// (first '^', as in src/gettext.cpp). '|' is ordinary text (name generator
+// grammars use it).
 std::string dsgettext(const char*, const char* msgid) {
     if (!msgid) return "";
-    // sgettext: strip context prefix "context|text" → "text"
-    const char* pipe = std::strchr(msgid, '|');
-    return pipe ? (pipe + 1) : msgid;
+    const char* hat = std::strchr(msgid, '^');
+    return hat ? (hat + 1) : msgid;
 }
 
 std::string dsngettext(const char*, const char* singular, const char* plural, int n) {
-    if (n == 1) return singular ? singular : "";
-    return plural ? plural : "";
+    const char* s = (n == 1) ? singular : plural;
+    if (!s) return "";
+    const char* hat = std::strchr(s, '^');
+    return hat ? (hat + 1) : s;
 }
 
 void bind_textdomain(const char*, const char*, const char*) {}

@@ -70,9 +70,19 @@ target_include_directories(n64_sdl2 INTERFACE "${N64_SDL2_INCLUDE_DIR}")
 target_compile_definitions(n64_sdl2 PRIVATE USING_GENERATED_CONFIG_H DYNAPI_NEEDS_DLOPEN)
 target_compile_options(n64_sdl2 PRIVATE ${N64_SDL_COMPILE_OPTIONS})
 
-# SDL_image: PNG and JPEG through its bundled stb_image; PNG saving through
-# its bundled miniz. (WebP images are converted to PNG when the ROM's data
-# tree is packed; the engine finds them under their original names.)
+# libwebp (decoder + demux): Wesnoth ships many images as WebP.
+set(N64_WEBP_DIR "${N64_DEPS_SOURCE_DIR}/libwebp")
+file(GLOB _webp_srcs "${N64_WEBP_DIR}/src/dec/*.c" "${N64_WEBP_DIR}/src/dsp/*.c"
+                     "${N64_WEBP_DIR}/src/utils/*.c" "${N64_WEBP_DIR}/src/demux/*.c")
+add_library(n64_webp STATIC EXCLUDE_FROM_ALL ${_webp_srcs})
+target_include_directories(n64_webp PUBLIC "${N64_WEBP_DIR}/src")
+target_include_directories(n64_webp PRIVATE "${N64_WEBP_DIR}")
+target_compile_definitions(n64_webp PRIVATE malloc=n64_vmalloc calloc=n64_vcalloc
+                                          realloc=n64_vrealloc free=n64_vfree)
+target_compile_options(n64_webp PRIVATE ${N64_SDL_COMPILE_OPTIONS})
+
+# SDL_image: PNG and JPEG through its bundled stb_image, WebP through libwebp;
+# PNG saving through its bundled miniz.
 set(_I "${N64_SDL_IMAGE_DIR}/src")
 add_library(n64_sdl2_image STATIC EXCLUDE_FROM_ALL
     ${_I}/IMG.c ${_I}/IMG_bmp.c ${_I}/IMG_gif.c ${_I}/IMG_jpg.c ${_I}/IMG_png.c
@@ -82,10 +92,10 @@ add_library(n64_sdl2_image STATIC EXCLUDE_FROM_ALL
 target_include_directories(n64_sdl2_image PRIVATE "${N64_SDL2_INCLUDE_DIR}/SDL2")
 target_include_directories(n64_sdl2_image INTERFACE "${N64_SDL2_INCLUDE_DIR}")
 target_compile_definitions(n64_sdl2_image PRIVATE
-    LOAD_BMP LOAD_GIF LOAD_JPG LOAD_PNG LOAD_TGA LOAD_XPM LOAD_PNM LOAD_QOI
+    LOAD_BMP LOAD_GIF LOAD_JPG LOAD_PNG LOAD_TGA LOAD_XPM LOAD_PNM LOAD_QOI LOAD_WEBP
     USE_STBIMAGE SDL_IMAGE_SAVE_PNG=1 SDL_IMAGE_SAVE_JPG=1)
 target_compile_options(n64_sdl2_image PRIVATE ${N64_SDL_COMPILE_OPTIONS})
-target_link_libraries(n64_sdl2_image PUBLIC n64_sdl2)
+target_link_libraries(n64_sdl2_image PUBLIC n64_sdl2 n64_webp)
 
 # ---------------------------------------------------------------------------
 # wesnoth_n64_sdltest: small ROM exercising the SDL port (renderer, target
