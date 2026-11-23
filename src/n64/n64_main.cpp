@@ -10,7 +10,6 @@
 
 #include "n64_platform.hpp"
 #include "n64_memory.hpp"
-#include "n64_audio.hpp"
 #include "n64_romfs.hpp"
 #include "n64_vfs.hpp"
 #include "netlib_adapter.hpp"
@@ -123,9 +122,6 @@ int main() {
     SDL_SetMemoryFunctions(n64_vmalloc, n64_vcalloc, n64_vrealloc, n64_vfree);
 #  endif
 
-    // --- Phase 4: Audio ---
-    n64_audio_init();
-
     // --- Phase 6: hand over to Wesnoth's own main() (src/wesnoth.cpp) ---
     // Everything from here on is the unmodified engine start-up path:
     // command line, game_launcher, fonts, language, video, gui2::init, the
@@ -143,7 +139,6 @@ int main() {
     const int rc = wesnoth_main(6, argv);
 
     // --- Shutdown ---
-    n64_audio_shutdown();
     N64_LOG("Wesnoth N64 exiting (%d).", rc);
     return rc;
 }

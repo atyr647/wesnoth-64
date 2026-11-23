@@ -33,6 +33,7 @@
 #define FB_DATA      "_SDL_N64Surface"
 
 void SDL_N64_RunTimers(void);
+void SDL_N64_AudioPump(void);
 
 /* ------------------------------------------------------------- output */
 
@@ -355,6 +356,7 @@ static void N64_PumpEvents(_THIS)
 {
     SDL_Window *window = _this->windows;
     SDL_N64_RunTimers();
+    SDL_N64_AudioPump();
     if (window) {
         if (SDL_GetMouseFocus() != window) {
             SDL_SetMouseFocus(window);

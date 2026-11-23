@@ -33,7 +33,6 @@ set(N64_SDL2_SOURCES
     ${_S}/atomic/SDL_atomic.c ${_S}/atomic/SDL_spinlock.c
     ${_S}/audio/SDL_audio.c ${_S}/audio/SDL_audiocvt.c ${_S}/audio/SDL_audiotypecvt.c
     ${_S}/audio/SDL_mixer.c ${_S}/audio/SDL_wave.c
-    ${_S}/audio/dummy/SDL_dummyaudio.c
     ${_S}/cpuinfo/SDL_cpuinfo.c
     ${_S}/file/SDL_rwops.c
     ${_S}/filesystem/dummy/SDL_sysfilesystem.c
@@ -55,6 +54,7 @@ set(N64_SDL2_SOURCES
     ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64video.c
     ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64timer.c
     ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64render.c
+    ${CMAKE_SOURCE_DIR}/src/n64/sdl2/SDL_n64audio.c
 )
 file(GLOB _sdl_glob
     ${_S}/events/*.c ${_S}/stdlib/*.c ${_S}/render/software/*.c ${_S}/video/*.c)
@@ -109,3 +109,21 @@ target_link_options(wesnoth_n64_sdltest PRIVATE
 target_link_libraries(wesnoth_n64_sdltest PRIVATE n64_sdl2_image n64_sdl2
     ${N64_INST}/mips64-elf/lib/libdragon.a ${N64_INST}/mips64-elf/lib/libdragonsys.a m c gcc)
 n64_create_rom(wesnoth_n64_sdltest)
+
+# SDL_mixer: WAV and Ogg Vorbis (its bundled stb_vorbis), the formats
+# Wesnoth's sounds and music use.
+set(N64_SDL_MIXER_DIR "${N64_DEPS_SOURCE_DIR}/SDL_mixer")
+if(EXISTS "${N64_SDL_MIXER_DIR}/include/SDL_mixer.h")
+    set(_M "${N64_SDL_MIXER_DIR}/src")
+    file(COPY "${N64_SDL_MIXER_DIR}/include/SDL_mixer.h" DESTINATION "${N64_SDL2_INCLUDE_DIR}/SDL2")
+    add_library(n64_sdl2_mixer STATIC EXCLUDE_FROM_ALL
+        ${_M}/mixer.c ${_M}/music.c ${_M}/utils.c ${_M}/effect_position.c
+        ${_M}/effect_stereoreverse.c ${_M}/effects_internal.c
+        ${_M}/codecs/load_aiff.c ${_M}/codecs/load_voc.c ${_M}/codecs/music_wav.c
+        ${_M}/codecs/music_ogg_stb.c)
+    target_include_directories(n64_sdl2_mixer PRIVATE "${N64_SDL2_INCLUDE_DIR}/SDL2" "${_M}" "${_M}/codecs")
+    target_include_directories(n64_sdl2_mixer INTERFACE "${N64_SDL2_INCLUDE_DIR}")
+    target_compile_definitions(n64_sdl2_mixer PRIVATE MUSIC_WAV MUSIC_OGG OGG_USE_STB)
+    target_compile_options(n64_sdl2_mixer PRIVATE ${N64_SDL_COMPILE_OPTIONS})
+    target_link_libraries(n64_sdl2_mixer PUBLIC n64_sdl2)
+endif()

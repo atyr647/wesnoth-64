@@ -6,6 +6,7 @@
  *   SDL_n64video.c  -- video driver: one 640x480 window shown at 640x240
  *                      progressive, controller input as mouse + keyboard
  *   SDL_n64render.c -- render driver on the RDP (640x480 drawn at 640x240)
+ *   SDL_n64audio.c  -- audio driver on libdragon's AI output
  *   SDL_n64timer.c  -- tick counter and SDL_AddTimer (run from event pumping:
  *                      there are no threads on this platform)
  */
@@ -124,7 +125,7 @@
 #define HAVE_SETJMP 1
 
 /* Subsystems */
-#define SDL_AUDIO_DRIVER_DUMMY 1
+#define SDL_AUDIO_DRIVER_DUMMY 1    /* SDL_n64audio.c (registered as DUMMYAUDIO_bootstrap) */
 #define SDL_JOYSTICK_DISABLED 1     /* the controller drives mouse + keyboard */
 #define SDL_HAPTIC_DISABLED 1
 #define SDL_HIDAPI_DISABLED 1

@@ -16,6 +16,7 @@ fetch() {   # fetch <dir> <git-url> <tag>
 }
 fetch SDL       https://github.com/libsdl-org/SDL.git               release-2.30.9
 fetch SDL_image https://github.com/libsdl-org/SDL_image.git         release-2.8.8
+fetch SDL_mixer https://github.com/libsdl-org/SDL_mixer.git         release-2.8.0
 fetch freetype  https://gitlab.freedesktop.org/freetype/freetype.git VER-2-13-3
 fetch harfbuzz  https://github.com/harfbuzz/harfbuzz.git            10.1.0
 fetch pixman    https://gitlab.freedesktop.org/pixman/pixman.git    pixman-0.44.2

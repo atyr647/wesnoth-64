@@ -58,7 +58,7 @@ if(N64_BUILD)
     # unit animation code run on it. The old stand-in renderer, GUI and input
     # layer are no longer part of the engine.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX
-        "/src/n64/(n64_video_adapter|n64_sdl_wrappers|n64_video|n64_gui|n64_input|n64_input_hotkeys|n64_display|n64_unit_display|n64_combat_display)\\.cpp$")
+        "/src/n64/(n64_video_adapter|n64_sdl_wrappers|n64_video|n64_gui|n64_input|n64_input_hotkeys|n64_display|n64_unit_display|n64_combat_display|n64_audio)\\.cpp$")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
@@ -270,7 +270,8 @@ if(N64_BUILD)
         src/hotkey/command_executor.cpp
         src/tooltips.cpp
         src/quit_confirmation.cpp
-        # src/sound_music_track.cpp — excluded; uses vorbisfile.h, stubs in n64_stubs.cpp
+        src/sound.cpp
+        src/sound_music_track.cpp
 
         # --- Resources and global state ---
         src/resources.cpp
@@ -758,7 +759,6 @@ if(N64_BUILD)
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_network_shim.hpp>"
-        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp>"
     )
 
     # Linker script: derived at configure time from libdragon's installed
@@ -862,6 +862,7 @@ if(N64_BUILD)
     target_link_libraries(wesnoth_n64 PRIVATE
         wesnoth_n64_lua
         n64_sdl2_image
+        n64_sdl2_mixer
         n64_sdl2
         n64_pango
         n64_cairo

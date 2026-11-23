@@ -61,12 +61,14 @@ Uint64 SDL_GetPerformanceFrequency(void)
 }
 
 void SDL_N64_RunTimers(void);
+void SDL_N64_AudioPump(void);
 
 void SDL_Delay(Uint32 ms)
 {
     const uint64_t end = get_ticks() + TICKS_FROM_MS((uint64_t)ms);
     while (get_ticks() < end) {
         SDL_N64_RunTimers();
+        SDL_N64_AudioPump();
     }
 }
 

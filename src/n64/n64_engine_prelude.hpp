@@ -23,9 +23,6 @@
 #define BOOST_LIB_VERSION "1_85"
 #endif
 
-// SDL_mixer: still provided by n64_sdl_mixer_shim.hpp
-#define SDL_MIXER_VERSION(x) do { (x)->major = 0; (x)->minor = 0; (x)->patch = 0; } while(0)
-inline const SDL_version* Mix_Linked_Version() { static SDL_version v = {0,0,0}; return &v; }
 
 // -----------------------------------------------------------------------
 // libcurl stubs
