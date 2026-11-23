@@ -120,7 +120,7 @@ if(EXISTS "${N64_SDL_MIXER_DIR}/include/SDL_mixer.h")
         ${_M}/mixer.c ${_M}/music.c ${_M}/utils.c ${_M}/effect_position.c
         ${_M}/effect_stereoreverse.c ${_M}/effects_internal.c
         ${_M}/codecs/load_aiff.c ${_M}/codecs/load_voc.c ${_M}/codecs/music_wav.c
-        ${_M}/codecs/music_ogg_stb.c)
+        ${_M}/codecs/music_ogg_stb.c ${_M}/codecs/mp3utils.c)
     target_include_directories(n64_sdl2_mixer PRIVATE "${N64_SDL2_INCLUDE_DIR}/SDL2" "${_M}" "${_M}/codecs")
     target_include_directories(n64_sdl2_mixer INTERFACE "${N64_SDL2_INCLUDE_DIR}")
     target_compile_definitions(n64_sdl2_mixer PRIVATE MUSIC_WAV MUSIC_OGG OGG_USE_STB)

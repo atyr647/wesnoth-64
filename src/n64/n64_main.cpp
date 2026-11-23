@@ -3,13 +3,12 @@
  *
  * Nintendo 64 entry point for Wesnoth.
  *
- * Initialises the N64 platform layer (memory pools, ROM filesystem, video,
- * audio, input; Expansion Pak check), then calls Wesnoth's own main() from
+ * Initialises the N64 platform layer (game data on the SD card or ROM, SDL
+ * memory and drivers; Expansion Pak check), then calls Wesnoth's own main() from
  * src/wesnoth.cpp, which runs the unmodified start-up and game loop.
  */
 
 #include "n64_platform.hpp"
-#include "n64_memory.hpp"
 #include "n64_romfs.hpp"
 #include "n64_vfs.hpp"
 #include "netlib_adapter.hpp"
@@ -96,9 +95,6 @@ int main() {
 
     N64_LOG("Wesnoth N64 starting up...");
     check_expansion_pak();
-
-    // --- Phase 1: Memory pools ---
-    n64_memory_init();
 
     // --- Phase 2: game data ---
     // The SummerCart64's SD card holds the unmodified data tree (directory

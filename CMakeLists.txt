@@ -59,6 +59,11 @@ if(N64_BUILD)
     # layer are no longer part of the engine.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX
         "/src/n64/(n64_video_adapter|n64_sdl_wrappers|n64_video|n64_gui|n64_input|n64_input_hotkeys|n64_display|n64_unit_display|n64_combat_display|n64_audio)\\.cpp$")
+    # Stand-ins from before the real engine ran (fixed memory pools, binary
+    # WML loader, Lua pool allocator, cartridge save chips): unused now, and
+    # their static buffers took physical RAM the RDP texture cache needs.
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX
+        "/src/n64/(n64_memory|n64_binary_wml|n64_lua_alloc|n64_save)\\.cpp$")
 
     # Core game logic sources — comprehensive list for a playable N64 build
     # Grouped by subsystem for clarity. N64 platform layer is auto-globbed above.
