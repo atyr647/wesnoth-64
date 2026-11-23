@@ -15,6 +15,8 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #ifdef N64_BUILD
 #  include <libdragon.h>
@@ -128,11 +130,29 @@ int main() {
     // n64_vfs.hpp). --nocache: the config cache stores gzip'd copies of the
     // parsed WML, for which the console has neither space nor a codec.
     eh_selftest();
-    static char a0[] = "wesnoth", a1[] = "--data-dir", a2[] = "/rom",
-                a3[] = "--userdata-dir", a4[] = "/save", a5[] = "--nocache";
-    static char* argv[] = { a0, a1, a2, a3, a4, a5, nullptr };
+    // Extra command-line options (e.g. --log-debug=...) can be put in
+    // args.txt in the user data directory, one per line.
+    static std::vector<std::string> args = { "wesnoth", "--data-dir", "/rom",
+                                             "--userdata-dir", "/save", "--nocache" };
+    {
+        std::string extra;
+        if (n64vfs::read("/save/args.txt", extra)) {
+            size_t i = 0;
+            while (i < extra.size()) {
+                size_t j = extra.find('\n', i);
+                if (j == std::string::npos) j = extra.size();
+                std::string a = extra.substr(i, j - i);
+                while (!a.empty() && (a.back() == '\r' || a.back() == ' ')) a.pop_back();
+                if (!a.empty() && a[0] != '#') { N64_LOG("extra argument: %s", a.c_str()); args.push_back(a); }
+                i = j + 1;
+            }
+        }
+    }
+    static std::vector<char*> argv;
+    for (auto& a : args) argv.push_back(a.data());
+    argv.push_back(nullptr);
     N64_LOG("Entering Wesnoth main()");
-    const int rc = wesnoth_main(6, argv);
+    const int rc = wesnoth_main((int)args.size(), argv.data());
 
     // --- Shutdown ---
     N64_LOG("Wesnoth N64 exiting (%d).", rc);
