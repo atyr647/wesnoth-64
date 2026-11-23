@@ -5,7 +5,9 @@
  * The engine uses the real SDL 2 and SDL_image (built for the console from
  * upstream sources, see cmake/n64_sdl2.cmake and src/n64/sdl2). What remains
  * here are version/feature stubs for libraries the console build leaves out
- * (libcurl and OpenSSL: online features only) and the platform basics.
+ * (libcurl and OpenSSL: online features only) and the platform basics. Text
+ * and vector drawing use real cairo/FreeType/HarfBuzz with the Pango subset
+ * in src/n64/pango (cmake/n64_text.cmake).
  */
 #ifdef N64_BUILD
 
@@ -39,19 +41,6 @@ inline curl_version_info_data* curl_version_info(CURLversion) {
     static curl_version_info_data d = { "0.0.0" };
     return &d;
 }
-
-// -----------------------------------------------------------------------
-// Cairo / Pango stubs
-// -----------------------------------------------------------------------
-#ifndef CAIRO_VERSION_STRING
-#define CAIRO_VERSION_STRING "0.0.0"
-#endif
-inline const char* cairo_version_string() { return "0.0.0"; }
-
-#ifndef PANGO_VERSION_STRING
-#define PANGO_VERSION_STRING "0.0.0"
-#endif
-inline const char* pango_version_string() { return "0.0.0"; }
 
 // -----------------------------------------------------------------------
 // OpenSSL version stubs (build_info.cpp uses these)

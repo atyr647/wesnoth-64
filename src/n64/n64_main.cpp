@@ -15,6 +15,9 @@
 #include "n64_vfs.hpp"
 #include "netlib_adapter.hpp"
 
+#include <cstring>
+#include <stdexcept>
+
 #ifdef N64_BUILD
 #  include <libdragon.h>
 #  include <n64sys.h>
@@ -37,14 +40,25 @@ extern "C" uint32_t n64_pager_frames_requested = 240;
 extern "C" void* n64_vmalloc(size_t);
 extern "C" void* n64_vrealloc(void*, size_t);
 extern "C" void  n64_vfree(void*);
-static void* n64_vcalloc(size_t n, size_t size) {
-    const size_t bytes = n * size;
-    if (size && bytes / size != n) return nullptr;
-    void* p = n64_vmalloc(bytes);
-    if (p) std::memset(p, 0, bytes);
-    return p;
-}
+extern "C" void* n64_vcalloc(size_t, size_t);
 #  endif
+
+// C++ exception self-test: a throw through a frame with a destructor (cleanup
+// landing pad + _Unwind_Resume) into a catch clause. Logs how many exception
+// pointers reached the runtime zero-extended (see pager/n64_eh_sext.S).
+extern "C" unsigned n64_eh_zero_extended;
+namespace {
+struct eh_probe { int* n; ~eh_probe() { ++*n; } };
+[[gnu::noinline]] void eh_throw(int v) { if (v >= 0) throw std::runtime_error("probe"); }
+[[gnu::noinline]] void eh_cleanup(int* n, int v) { eh_probe p{ n }; eh_throw(v); }
+void eh_selftest() {
+    int dtors = 0;
+    bool caught = false;
+    try { eh_cleanup(&dtors, 1); } catch (const std::exception& e) { caught = std::strcmp(e.what(), "probe") == 0; }
+    N64_LOG("C++ exceptions: %s (destructors run %d, zero-extended pointers fixed %u)",
+            caught && dtors == 1 ? "ok" : "BROKEN", dtors, n64_eh_zero_extended);
+}
+} // namespace
 
 // Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
 int wesnoth_main(int argc, char** argv);
@@ -124,6 +138,7 @@ int main() {
     // The data tree is the cartridge (/rom) and user data lives in /save (see
     // n64_vfs.hpp). --nocache: the config cache stores gzip'd copies of the
     // parsed WML, for which the console has neither space nor a codec.
+    eh_selftest();
     static char a0[] = "wesnoth", a1[] = "--data-dir", a2[] = "/rom",
                 a3[] = "--userdata-dir", a4[] = "/save", a5[] = "--nocache";
     static char* argv[] = { a0, a1, a2, a3, a4, a5, nullptr };

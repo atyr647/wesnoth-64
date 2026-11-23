@@ -30,7 +30,10 @@ if(N64_BUILD)
     # they must not be swept into the engine (each defines its own main()).
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/(app|smoke|pager|sdl2)/")
     # SDL 2 and SDL_image built for the console (src/n64/sdl2 + upstream sources).
+    enable_language(ASM)
     include(${CMAKE_SOURCE_DIR}/cmake/n64_sdl2.cmake)
+    # FreeType, HarfBuzz, pixman, cairo, and the Pango API on top of them.
+    include(${CMAKE_SOURCE_DIR}/cmake/n64_text.cmake)
     # Superseded by the real src/game_launcher.cpp.
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_game_launcher\\.cpp$")
     # Superseded by the real src/filesystem.cpp running over n64_vfs.cpp.
@@ -42,9 +45,10 @@ if(N64_BUILD)
         ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_dialog_impls.cpp
         ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_stubs.cpp
         ${CMAKE_SOURCE_DIR}/src/n64/n64_draw_manager.cpp
-        ${CMAKE_SOURCE_DIR}/src/n64/n64_font_text.cpp
         ${CMAKE_SOURCE_DIR}/src/n64/n64_gui2_dialog_stubs.cpp)
     list(REMOVE_ITEM N64_PLATFORM_SOURCES ${N64_STUB_SOURCES})
+    # Superseded by the engine's own font/text.cpp on the Pango subset (src/n64/pango).
+    list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_font_text\\.cpp$")
     # Superseded by the real src/preferences/preferences.cpp (file in /save).
     list(FILTER N64_PLATFORM_SOURCES EXCLUDE REGEX "/src/n64/n64_preferences\\.cpp$")
     # Superseded by the real src/events.cpp (controller input arrives as SDL events).
@@ -401,8 +405,8 @@ if(N64_BUILD)
         src/filesystem.cpp
         src/filesystem_common.cpp
 
-        # --- Font (N64: text.cpp replaced by n64_font_text.cpp, font_config.cpp uses fontconfig shim) ---
-        # src/font/text.cpp — excluded; replaced by src/n64/n64_font_text.cpp (auto-globbed)
+        # --- Font (Pango calls served by src/n64/pango; fontconfig calls likewise) ---
+        src/font/text.cpp
         src/font/font_config.cpp
         src/font/sdl_ttf_compat.cpp
         src/font/standard_colors.cpp
@@ -732,6 +736,8 @@ if(N64_BUILD)
         src/
         src/n64/
         ${N64_SDL2_INCLUDE_DIR}       # real SDL 2 / SDL_image headers first
+        ${CMAKE_SOURCE_DIR}/src/n64/pango/include   # Pango subset + fontconfig calls
+        ${N64_TEXT_INCLUDE_DIRS}      # cairo, FreeType, HarfBuzz
         src/n64/sdl2_stubs/
         src/modules/lua/
         ${N64_INST}/include
@@ -750,7 +756,6 @@ if(N64_BUILD)
     target_compile_options(wesnoth_n64 PRIVATE
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_engine_prelude.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_boost_shim.hpp>"
-        "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_font_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_threading_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_network_shim.hpp>"
         "SHELL:$<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/n64/n64_sdl_mixer_shim.hpp>"
@@ -798,7 +803,8 @@ if(N64_BUILD)
     target_compile_definitions(wesnoth_n64 PRIVATE N64_PAGED=1)
     # Resident code must be real object code (not LTO IR), or its sections
     # would not carry the file names cmake/n64_paged.ld selects on.
-    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp)
+    target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
+        src/n64/pager/n64_eh_sext.S)
     set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
         src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         PROPERTIES COMPILE_OPTIONS "-fno-lto")
@@ -816,6 +822,8 @@ if(N64_BUILD)
         -L${CMAKE_BINARY_DIR}
         -Wl,--wrap=__do_global_ctors
         -Wl,--wrap=__cxa_throw
+        -Wl,--wrap=_Unwind_Resume
+        -Wl,--wrap=__cxa_begin_catch
         -Wl,--gc-sections
         -Wl,-Map=${CMAKE_BINARY_DIR}/wesnoth_n64.map
     )
@@ -855,6 +863,11 @@ if(N64_BUILD)
         wesnoth_n64_lua
         n64_sdl2_image
         n64_sdl2
+        n64_pango
+        n64_cairo
+        n64_pixman
+        n64_harfbuzz
+        n64_freetype
         wesnoth_n64_stubs
         ${N64_LIBDRAGON_PAGED}
         ${N64_INST}/mips64-elf/lib/libdragonsys.a

@@ -220,6 +220,14 @@ extern "C" void* n64_vmalloc(size_t n) {
     return p;
 }
 
+extern "C" void* n64_vcalloc(size_t n, size_t size) {
+    const size_t bytes = n * size;
+    if (size && bytes / size != n) return nullptr;
+    void* p = n64_vmalloc(bytes);
+    if (p) std::memset(p, 0, bytes);
+    return p;
+}
+
 extern "C" void n64_vfree(void* p) {
     if (!p) return;
     if (!in_heap(p)) { std::free(p); return; }

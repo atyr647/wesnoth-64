@@ -19,6 +19,9 @@ set(_GEN "${CMAKE_BINARY_DIR}/n64-text-include")
 
 set(N64_TEXT_COMPILE_OPTIONS -mlong-calls -fno-strict-aliasing -w
     $<$<COMPILE_LANGUAGE:C>:-Wno-error=incompatible-pointer-types>)
+# Their allocations (glyph caches, image surfaces, font tables) go to the
+# swappable heap; physical RAM is kept for DMA and the frame pool.
+set(N64_TEXT_ALLOC_DEFS malloc=n64_vmalloc calloc=n64_vcalloc realloc=n64_vrealloc free=n64_vfree)
 
 # --------------------------------------------------------------- FreeType
 set(_F "${_D}/freetype/src")
@@ -34,14 +37,15 @@ file(MAKE_DIRECTORY "${_GEN}/freetype-config")
 configure_file("${_CFG}/ftmodule.h" "${_GEN}/freetype-config/ftmodule.h" COPYONLY)
 target_include_directories(n64_freetype PUBLIC "${_D}/freetype/include")
 target_include_directories(n64_freetype PRIVATE "${_GEN}/freetype-config")
-target_compile_definitions(n64_freetype PRIVATE FT2_BUILD_LIBRARY
+target_compile_definitions(n64_freetype PRIVATE ${N64_TEXT_ALLOC_DEFS} FT2_BUILD_LIBRARY
     "FT_CONFIG_MODULES_H=<ftmodule.h>")
 target_compile_options(n64_freetype PRIVATE -O2 ${N64_TEXT_COMPILE_OPTIONS})
 
 # --------------------------------------------------------------- HarfBuzz
 add_library(n64_harfbuzz STATIC EXCLUDE_FROM_ALL "${_D}/harfbuzz/src/harfbuzz.cc")
 target_include_directories(n64_harfbuzz PUBLIC "${_D}/harfbuzz/src")
-target_compile_definitions(n64_harfbuzz PRIVATE HAVE_FREETYPE=1 HB_NO_MT=1)
+target_compile_definitions(n64_harfbuzz PRIVATE HAVE_FREETYPE=1 HB_NO_MT=1
+    hb_malloc_impl=n64_vmalloc hb_calloc_impl=n64_vcalloc hb_realloc_impl=n64_vrealloc hb_free_impl=n64_vfree)
 target_compile_options(n64_harfbuzz PRIVATE -Os -fno-exceptions -fno-rtti ${N64_TEXT_COMPILE_OPTIONS})
 target_link_libraries(n64_harfbuzz PUBLIC n64_freetype)
 
@@ -65,7 +69,7 @@ add_library(n64_pixman STATIC EXCLUDE_FROM_ALL
     ${_P}/pixman-trap.c ${_P}/pixman-utils.c
     ${_P}/pixman-arm.c ${_P}/pixman-mips.c ${_P}/pixman-ppc.c ${_P}/pixman-x86.c ${_P}/pixman-riscv.c)
 target_include_directories(n64_pixman PUBLIC "${_P}" "${_GEN}/pixman")
-target_compile_definitions(n64_pixman PRIVATE HAVE_CONFIG_H "PIXMAN_CONFIG_H_NAME=\"pixman-config.h\"")
+target_compile_definitions(n64_pixman PRIVATE ${N64_TEXT_ALLOC_DEFS} HAVE_CONFIG_H "PIXMAN_CONFIG_H_NAME=\"pixman-config.h\"")
 target_compile_options(n64_pixman PRIVATE -O2 ${N64_TEXT_COMPILE_OPTIONS})
 
 # ------------------------------------------------------------------ cairo
@@ -86,9 +90,20 @@ configure_file("${_CFG}/cairo-features.h" "${_GEN}/cairo/cairo-features.h" COPYO
 configure_file("${_CFG}/cairo-config.h" "${_GEN}/cairo/config.h" COPYONLY)
 add_library(n64_cairo STATIC EXCLUDE_FROM_ALL ${_cairo_srcs})
 target_include_directories(n64_cairo PUBLIC "${_C}" "${_GEN}/cairo")
-target_compile_definitions(n64_cairo PRIVATE HAVE_CONFIG_H CAIRO_COMPILATION)
+target_compile_definitions(n64_cairo PRIVATE ${N64_TEXT_ALLOC_DEFS} HAVE_CONFIG_H CAIRO_COMPILATION)
 target_compile_options(n64_cairo PRIVATE -O2 ${N64_TEXT_COMPILE_OPTIONS})
 target_link_libraries(n64_cairo PUBLIC n64_pixman n64_freetype)
 
 set(N64_TEXT_INCLUDE_DIRS
     "${_D}/freetype/include" "${_D}/harfbuzz/src" "${_P}" "${_GEN}/pixman" "${_C}" "${_GEN}/cairo")
+
+# ------------------------------------------------------- Pango (subset)
+add_library(n64_pango STATIC EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/src/n64/pango/n64_pango_core.cpp
+    ${CMAKE_SOURCE_DIR}/src/n64/pango/n64_pango_fonts.cpp
+    ${CMAKE_SOURCE_DIR}/src/n64/pango/n64_pango_layout.cpp)
+target_include_directories(n64_pango PUBLIC "${CMAKE_SOURCE_DIR}/src/n64/pango/include")
+target_include_directories(n64_pango PRIVATE "${CMAKE_SOURCE_DIR}/src/n64" "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(n64_pango PRIVATE N64_BUILD=1)
+target_compile_options(n64_pango PRIVATE -O2 -mlong-calls)
+target_link_libraries(n64_pango PUBLIC n64_cairo n64_harfbuzz n64_freetype)

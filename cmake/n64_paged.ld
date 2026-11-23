@@ -48,6 +48,7 @@ SECTIONS {
         *n64_libgcc.c.obj(.text .text.*)
         *n64_vheap.cpp.obj(.text .text.*)
         *n64_throwlog.cpp.obj(.text .text.*)
+        *n64_eh_sext.S.obj(.text .text.*)
         /* libstdc++'s weak template functions, wherever they were emitted
            (generated into the build directory by CMakeLists.txt) */
         INCLUDE n64_resident_weak.ld
