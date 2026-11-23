@@ -11,6 +11,9 @@
 #include "n64_platform.hpp"
 #include "n64_romfs.hpp"
 #include "n64_vfs.hpp"
+#  ifdef N64_PAGED
+#    include "pager/n64_pager.h"
+#  endif
 #include "netlib_adapter.hpp"
 
 #include <cstring>
@@ -143,7 +146,14 @@ int main() {
                 if (j == std::string::npos) j = extra.size();
                 std::string a = extra.substr(i, j - i);
                 while (!a.empty() && (a.back() == '\r' || a.back() == ' ')) a.pop_back();
-                if (!a.empty() && a[0] != '#') { N64_LOG("extra argument: %s", a.c_str()); args.push_back(a); }
+                if (a == "--n64-watchdog") {
+#  ifdef N64_PAGED
+                    n64_pager_start_watchdog();
+#  endif
+                } else if (!a.empty() && a[0] != '#') {
+                    N64_LOG("extra argument: %s", a.c_str());
+                    args.push_back(a);
+                }
                 i = j + 1;
             }
         }

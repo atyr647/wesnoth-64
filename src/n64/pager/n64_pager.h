@@ -42,6 +42,9 @@ typedef struct {
 
 void n64_pager_get_stats(n64_pager_stats_t* out);
 
+// Log the interrupted PC and pager counters every 15 s (diagnostics).
+void n64_pager_start_watchdog(void);
+
 // Size in bytes of the swappable heap at VH_BASE (0 if not available).
 uint32_t n64_pager_heap_size(void);
 

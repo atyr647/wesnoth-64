@@ -389,3 +389,35 @@ int main(void) {
     int (*volatile entry)(void) = n64_paged_main;
     return entry();
 }
+
+// ---------------------------------------------------------------------------
+// Watchdog: every 15 s (timer interrupt) log the interrupted program counter
+// and the pager's counters -- a crude sampling profiler that tells a busy
+// loop from paging thrash or an idle wait, without a debugger. Started by
+// the --n64-watchdog option (src/n64/n64_main.cpp).
+// ---------------------------------------------------------------------------
+#include <timer.h>
+static n64_pager_stats_t s_wd_last;
+static void watchdog_cb(int ovfl)
+{
+    (void)ovfl;
+    uint32_t epc;
+    asm volatile("mfc0 %0,$14" : "=r"(epc));
+    debugf("[watchdog] pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu\n",
+           (unsigned long)epc,
+           (unsigned long)(s_stats.faults - s_wd_last.faults),
+           (unsigned long)(s_stats.refills - s_wd_last.refills),
+           (unsigned long)(s_stats.evictions - s_wd_last.evictions),
+           (unsigned long)(s_stats.writebacks - s_wd_last.writebacks),
+           (unsigned long)(s_stats.swapins - s_wd_last.swapins));
+    s_wd_last = s_stats;
+}
+
+void n64_pager_start_watchdog(void)
+{
+    static int started;
+    if (started) return;
+    started = 1;
+    timer_init();
+    new_timer(TIMER_TICKS(15 * 1000000), TF_CONTINUOUS, watchdog_cb);
+}
