@@ -85,7 +85,6 @@ static inline int32_t va_page(uint32_t va) {
     if (va >= VH_BASE && va < VH_BASE + s_nheap * PG_SIZE) return (int32_t)(s_ncode + ((va - VH_BASE) >> PG_SHIFT));
     return -1;
 }
-static inline uint32_t swap_addr(uint32_t page) { return s_swap_base + (page - s_ncode) * PG_SIZE; }
 
 // Heap pages beyond what the cartridge SDRAM holds swap to a file on the SD
 // card (attached after the card is mounted, see n64_pager_attach_sd_swap).
@@ -210,26 +209,89 @@ static uint32_t pick_frame(void) {
     }
 }
 
-#ifdef N64_SWAP_STATS
-// Measurement: how well would heap pages compress (compressed swap)?
+// ---------------------------------------------------------------------------
+// Compressed swap. Heap pages written back to the cartridge SDRAM are stored
+// LZ4-compressed in slots of whole 1 KiB units (all-zero pages take none), so
+// the virtual heap can be well over twice the SDRAM it uses. Slots are kept
+// in per-size free lists and carved from the top of the swap area.
+// ---------------------------------------------------------------------------
 #define LZ4_STATIC_LINKING_ONLY
 #include "lz4/lz4.h"
+#define CS_UNIT        1024u
+#define CS_CLASSES     (PG_SIZE / CS_UNIT)       // slot sizes 1..16 units
+#define CS_RAW         0xFFFFu                   // clen: stored uncompressed
+#define CS_FREE_MAX    1024u                     // free slots remembered per size
+extern int decompress_lz4_full_fast(const void* inbuf, int insize, void* outbuf);   // libdragon
 static LZ4_stream_t s_lz4_state;
-static char s_lz4_out[LZ4_COMPRESSBOUND(PG_SIZE)];
+static uint8_t s_cbuf[LZ4_COMPRESSBOUND(PG_SIZE) + 16] __attribute__((aligned(16)));
+static uint8_t s_dbuf[PG_SIZE + 16] __attribute__((aligned(16)));   // decoder may write 8 bytes past the end
+static uint16_t s_slot[MAX_PAGES];             // unit index of the page's slot (0 = none)
+static uint16_t s_clen[MAX_PAGES];             // compressed bytes (CS_RAW: uncompressed)
+static uint16_t s_cfree[CS_CLASSES][CS_FREE_MAX];
+static uint16_t s_cfree_n[CS_CLASSES];
+static uint32_t s_cs_top = 1, s_cs_units;      // next unit to carve; units in the area
 static uint64_t s_cz_in, s_cz_out, s_cz_ticks;
 static uint32_t s_cz_zero;
-static void swap_stats(const uint8_t* page) {
+
+static inline uint32_t cs_units(uint32_t page) {
+    return s_clen[page] == CS_RAW ? CS_CLASSES : (s_clen[page] + CS_UNIT - 1) / CS_UNIT;
+}
+static void cs_release(uint32_t page) {
+    if (!s_slot[page]) return;
+    const uint32_t c = cs_units(page) - 1;
+    if (s_cfree_n[c] < CS_FREE_MAX) s_cfree[c][s_cfree_n[c]++] = s_slot[page];
+    s_slot[page] = 0;
+}
+static uint16_t cs_alloc(uint32_t units) {
+    if (s_cfree_n[units - 1]) return s_cfree[units - 1][--s_cfree_n[units - 1]];
+    if (s_cs_top + units <= s_cs_units) { uint16_t u = (uint16_t)s_cs_top; s_cs_top += units; return u; }
+    for (uint32_t c = units; c < CS_CLASSES; ++c)          // a bigger free slot (rest wasted)
+        if (s_cfree_n[c]) return s_cfree[c][--s_cfree_n[c]];
+    assertf(0, "out of swap: the heap does not fit in the cartridge SDRAM even compressed "
+               "(%lu KiB stored for %lu KiB of pages)", (unsigned long)(s_cz_out >> 10), (unsigned long)(s_cz_in >> 10));
+    return 0;
+}
+static inline uint32_t cs_addr(uint16_t unit) { return s_swap_base + (uint32_t)unit * CS_UNIT; }
+
+// Write a heap page (frame contents) to compressed swap.
+static void cs_store(uint32_t page, const uint8_t* src) {
     const uint64_t t0 = get_ticks();
-    const uint64_t* w = (const uint64_t*)page;
+    cs_release(page);
+    const uint64_t* w = (const uint64_t*)src;
     uint32_t i = 0;
     while (i < PG_SIZE / 8 && w[i] == 0) ++i;
-    if (i == PG_SIZE / 8) { ++s_cz_zero; s_cz_in += PG_SIZE; return; }
-    int n = LZ4_compress_fast_extState(&s_lz4_state, (const char*)page, s_lz4_out, PG_SIZE, sizeof s_lz4_out, 1);
     s_cz_in += PG_SIZE;
-    s_cz_out += n > 0 ? (uint64_t)n : PG_SIZE;
+    if (i == PG_SIZE / 8) { s_clen[page] = 0; ++s_cz_zero; return; }   // zero page: nothing stored
+    int n = LZ4_compress_fast_extState(&s_lz4_state, (const char*)src, (char*)s_cbuf, PG_SIZE,
+                                       (int)sizeof s_cbuf - 16, 1);
+    const uint8_t* data = s_cbuf;
+    if (n <= 0 || n > (int)(PG_SIZE - CS_UNIT)) { n = PG_SIZE; s_clen[page] = CS_RAW; data = src; }
+    else s_clen[page] = (uint16_t)n;
+    const uint32_t units = cs_units(page);
+    s_slot[page] = cs_alloc(units);
+    if (data == s_cbuf) data_cache_hit_writeback(s_cbuf, (n + 15) & ~15);
+    dma_write(data, cs_addr(s_slot[page]), (n + 1) & ~1);
+    s_cz_out += (uint64_t)units * CS_UNIT;
     s_cz_ticks += get_ticks() - t0;
 }
-#endif
+
+// Read a heap page back from compressed swap into a frame.
+static void cs_load(uint32_t page, uint8_t* dst) {
+    if (!s_slot[page]) { memset(dst, 0, PG_SIZE); return; }            // zero page
+    if (s_clen[page] == CS_RAW) {
+        data_cache_hit_writeback_invalidate(dst, PG_SIZE);
+        dma_read(dst, cs_addr(s_slot[page]), PG_SIZE);
+        data_cache_hit_invalidate(dst, PG_SIZE);
+        return;
+    }
+    const uint32_t n = s_clen[page];
+    data_cache_hit_writeback_invalidate(s_cbuf, (n + 15) & ~15u);
+    dma_read(s_cbuf, cs_addr(s_slot[page]), (n + 1) & ~1u);
+    data_cache_hit_invalidate(s_cbuf, (n + 15) & ~15u);
+    const int got = decompress_lz4_full_fast(s_cbuf, (int)n, s_dbuf);
+    assertf(got == (int)PG_SIZE, "swap: corrupt compressed page %lu (%d bytes)", (unsigned long)page, got);
+    memcpy(dst, s_dbuf, PG_SIZE);
+}
 
 static void evict(uint32_t fi) {
     frame_t* f = &s_frames[fi];
@@ -240,11 +302,8 @@ static void evict(uint32_t fi) {
     if (is_heap(old) && (s_flags[old] & F_DIRTY)) {
         uint8_t* src = s_pool + fi * PG_SIZE;
         data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM / SD
-#ifdef N64_SWAP_STATS
-        swap_stats(src);
-#endif
         if (on_sd(old)) { sd_page_io(old, src, 1); ++s_stats.sd_writes; }
-        else dma_write(src, swap_addr(old), PG_SIZE);
+        else cs_store(old, src);
         s_flags[old] = (uint8_t)((s_flags[old] & ~F_DIRTY) | F_SWAPPED);
         ++s_stats.writebacks;
     }
@@ -264,10 +323,14 @@ static void load_page(uint32_t page) {
         data_cache_hit_invalidate(dst, PG_SIZE);
         inst_cache_hit_invalidate(dst, PG_SIZE);
     } else if (s_flags[page] & F_SWAPPED) {
-        data_cache_hit_writeback_invalidate(dst, PG_SIZE);
-        if (on_sd(page)) { sd_page_io(page, dst, 0); ++s_stats.sd_reads; }
-        else dma_read(dst, swap_addr(page), PG_SIZE);
-        data_cache_hit_invalidate(dst, PG_SIZE);
+        if (on_sd(page)) {
+            data_cache_hit_writeback_invalidate(dst, PG_SIZE);
+            sd_page_io(page, dst, 0);
+            data_cache_hit_invalidate(dst, PG_SIZE);
+            ++s_stats.sd_reads;
+        } else {
+            cs_load(page, dst);
+        }
         ++s_stats.swapins;
     } else {
         memset(dst, 0, PG_SIZE);                 // fresh heap page
@@ -378,7 +441,15 @@ static void pager_init(void) {
     uint32_t rom_end = rompak_search_ext(".end");
     s_swap_base = rom_end ? ((rom_end + 64 + 0xFFFFu) & ~0xFFFFu) : 0;
     if (s_swap_base && s_swap_base < SWAP_CART_END && sc64_enable_sdram_writes()) {
-        s_nsdram = ((SWAP_CART_END - s_swap_base) / PG_SIZE) & ~1u;
+        // Compressed swap: the SDRAM area holds the heap at ~2.7:1 (measured on
+        // Wesnoth's heap); offer 2.5x its size as virtual heap.
+        uint32_t swap_end = SWAP_CART_END;
+#ifdef N64_SWAP_AREA_LIMIT_MB   /* testing: a smaller swap area, as with a bigger ROM image */
+        if (swap_end - s_swap_base > N64_SWAP_AREA_LIMIT_MB * 1048576u) swap_end = s_swap_base + N64_SWAP_AREA_LIMIT_MB * 1048576u;
+#endif
+        s_cs_units = (swap_end - s_swap_base) / CS_UNIT;
+        if (s_cs_units > 0xFFFFu) s_cs_units = 0xFFFFu;
+        s_nsdram = ((uint32_t)((uint64_t)(swap_end - s_swap_base) * 5 / 2 / PG_SIZE)) & ~1u;
         if (s_ncode + s_nsdram > MAX_PAGES) s_nsdram = (MAX_PAGES - s_ncode) & ~1u;
 #ifdef N64_SDRAM_SWAP_LIMIT_MB   /* testing: force most of the heap onto the SD swap file */
         if (s_nsdram > N64_SDRAM_SWAP_LIMIT_MB * 64u) s_nsdram = N64_SDRAM_SWAP_LIMIT_MB * 64u;
@@ -479,13 +550,13 @@ static void watchdog_cb(int ovfl)
            (unsigned long)(s_stats.sd_writes - s_wd_last.sd_writes),
            (unsigned long)(s_stats.sd_reads - s_wd_last.sd_reads));
     s_wd_last = s_stats;
-#ifdef N64_SWAP_STATS
     if (s_cz_in)
-        debugf("[watchdog] heap pages written back: %lu KiB, %lu all-zero; LZ4 would store %lu KiB (%lu%%), %lu us per page\n",
-               (unsigned long)(s_cz_in >> 10), (unsigned long)s_cz_zero, (unsigned long)(s_cz_out >> 10),
+        debugf("[watchdog] compressed swap (virtual heap %lu MiB): %lu KiB of %lu KiB used; written %lu KiB as %lu KiB (%lu%%), %lu us per page\n",
+               (unsigned long)((s_nsdram * PG_SIZE) >> 20),
+               (unsigned long)((s_cs_top * CS_UNIT) >> 10), (unsigned long)((s_cs_units * CS_UNIT) >> 10),
+               (unsigned long)(s_cz_in >> 10), (unsigned long)(s_cz_out >> 10),
                (unsigned long)(s_cz_out * 100 / s_cz_in),
                (unsigned long)(TICKS_TO_US(s_cz_ticks) / (s_cz_in / PG_SIZE - s_cz_zero + 1)));
-#endif
 }
 
 void n64_pager_start_watchdog(void)

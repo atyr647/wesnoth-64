@@ -810,14 +810,14 @@ if(N64_BUILD)
     # would not carry the file names cmake/n64_paged.ld selects on.
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         src/n64/pager/n64_eh_sext.S)
-    # Measurement build: -DN64_SWAP_STATS=ON logs how well evicted heap pages
-    # would compress (src/n64/pager/lz4 is only linked then).
-    option(N64_SWAP_STATS "Log heap page compressibility (diagnostics)" OFF)
-    if(N64_SWAP_STATS)
-        target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
-        set_source_files_properties(src/n64/pager/n64_pager.c src/n64/pager/lz4/lz4.c PROPERTIES
-            COMPILE_DEFINITIONS "N64_SWAP_STATS=1")
-        set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2")
+    # LZ4 compressor for the pager's compressed swap (resident, see n64_paged.ld).
+    target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
+    set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2")
+    # Testing: -DN64_SWAP_AREA_LIMIT_MB=<n> caps the SDRAM swap area (as a bigger ROM would).
+    set(N64_SWAP_AREA_LIMIT_MB "" CACHE STRING "Cap the SDRAM swap area (testing)")
+    if(N64_SWAP_AREA_LIMIT_MB)
+        set_property(SOURCE src/n64/pager/n64_pager.c APPEND PROPERTY
+            COMPILE_DEFINITIONS "N64_SWAP_AREA_LIMIT_MB=${N64_SWAP_AREA_LIMIT_MB}u")
     endif()
     set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
         src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
