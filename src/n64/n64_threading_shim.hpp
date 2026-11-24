@@ -89,16 +89,23 @@ private:
     bool joined_ = true;
 };
 
+} // namespace std
+extern "C" void n64_sleep_us(unsigned long long us);
+namespace std {
 namespace this_thread {
     inline thread::id get_id() noexcept { return thread::id(1); }
 
     template<typename Rep, typename Period>
-    inline void sleep_for(const chrono::duration<Rep, Period>&) {
-        // No-op on N64; could add a busy-wait but not needed
+    inline void sleep_for(const chrono::duration<Rep, Period>& d) {
+        // One thread: wait here (timers and audio keep running, see SDL_Delay).
+        const auto us = chrono::duration_cast<chrono::microseconds>(d).count();
+        if (us > 0) n64_sleep_us(static_cast<unsigned long long>(us));
     }
 
     template<typename Clock, typename Duration>
-    inline void sleep_until(const chrono::time_point<Clock, Duration>&) {}
+    inline void sleep_until(const chrono::time_point<Clock, Duration>& t) {
+        sleep_for(t - Clock::now());
+    }
 
     inline void yield() noexcept {}
 }

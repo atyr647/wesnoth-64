@@ -140,3 +140,21 @@ struct passwd* getpwuid(int uid) { (void)uid; return 0; }
  * --wrap=__cxa_throw). Resident, because libstdc++ throws through it too. */
 #include <stdio.h>
 /* __wrap___cxa_throw: see pager/n64_throwlog.cpp */
+
+/* Wall clock. libdragon's gettimeofday() fails unless a real-time clock is
+ * hooked up, which left time() and every std::chrono clock returning
+ * garbage (Wesnoth's frame limiter then waited forever). Linked with
+ * --wrap=gettimeofday: the time is a fixed epoch (2026-01-01 00:00:00 UTC)
+ * plus the time since power-on, monotonic with microsecond resolution. */
+#include <sys/time.h>
+#include <stdint.h>
+extern uint64_t get_ticks_us(void);
+int __wrap_gettimeofday(struct timeval* tv, void* tz) {
+    (void)tz;
+    if (tv) {
+        const uint64_t us = get_ticks_us();
+        tv->tv_sec = (time_t)(1767225600ull + us / 1000000u);
+        tv->tv_usec = (suseconds_t)(us % 1000000u);
+    }
+    return 0;
+}

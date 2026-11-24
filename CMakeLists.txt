@@ -827,6 +827,7 @@ if(N64_BUILD)
         -L${CMAKE_BINARY_DIR}
         -Wl,--wrap=__do_global_ctors
         -Wl,--wrap=__cxa_throw
+        -Wl,--wrap=gettimeofday
         -Wl,--wrap=_Unwind_Resume
         -Wl,--wrap=__cxa_begin_catch
         -Wl,--gc-sections

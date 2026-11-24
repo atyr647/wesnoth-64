@@ -63,6 +63,11 @@ void eh_selftest() {
 }
 } // namespace
 
+// std::this_thread::sleep_for (n64_threading_shim.hpp).
+extern "C" void n64_sleep_us(unsigned long long us) {
+    SDL_Delay(static_cast<Uint32>((us + 999) / 1000));
+}
+
 // Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
 int wesnoth_main(int argc, char** argv);
 
