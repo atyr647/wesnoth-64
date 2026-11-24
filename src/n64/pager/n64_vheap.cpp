@@ -290,6 +290,7 @@ void* prof_alloc(size_t n, uint32_t ra) {
     h->size = (uint32_t)n;
     s_sites[h->site].bytes += (int32_t)n;
     s_sites[h->site].count += 1;
+    if (n >= 128 * 1024) std::fprintf(stderr, "[heapprof] + %u bytes at %p by %08lx\n", (unsigned)n, raw + 8, (unsigned long)ra);
     return raw + 8;
 }
 uint8_t* raw_of(void* p) {
@@ -299,16 +300,21 @@ uint8_t* raw_of(void* p) {
 void prof_free(void* p) {
     hdr* h = reinterpret_cast<hdr*>(static_cast<uint8_t*>(p) - 8);
     site& e = s_sites[h->site];
+    if (h->size >= 128 * 1024) std::fprintf(stderr, "[heapprof] - %u bytes at %p\n", (unsigned)h->size, p);
     e.bytes -= (int32_t)h->size;
     e.count -= 1;
     raw_vfree(raw_of(p));
 }
 } // namespace
 
+// Large blocks (>= 128 KiB: decoded images, textures, font tables) are also
+// logged individually with their size, so blocks allocated through SDL_malloc
+// (charged to SDL_malloc itself) can be told apart.
+static uint32_t charge_to(uint32_t ra) { return ra; }
 extern "C" void* n64_vmalloc(size_t n) {
     init();
     if (!s_size) return std::malloc(n);
-    return prof_alloc(n, (uint32_t)(uintptr_t)__builtin_return_address(0));
+    return prof_alloc(n, charge_to((uint32_t)(uintptr_t)__builtin_return_address(0)));
 }
 extern "C" void n64_vfree(void* p) {
     if (!p) return;
@@ -360,7 +366,13 @@ extern "C" void n64_vheap_profile_dump(const char* why) {
 extern "C" void* n64_vcalloc(size_t n, size_t size) {
     const size_t bytes = n * size;
     if (size && bytes / size != n) return nullptr;
+#ifdef N64_HEAP_PROFILE
+    init();
+    void* p = s_size ? prof_alloc(bytes, charge_to((uint32_t)(uintptr_t)__builtin_return_address(0)))
+                     : std::malloc(bytes);
+#else
     void* p = n64_vmalloc(bytes);
+#endif
     if (p) std::memset(p, 0, bytes);
     return p;
 }
