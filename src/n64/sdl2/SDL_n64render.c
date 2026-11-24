@@ -80,6 +80,9 @@ typedef struct
     SDL_bool attached;
 } N64_RenderData;
 
+/* diagnostics: work done since the last log line */
+static struct { unsigned copies, skipped, fills, clears, queues, uploads; uint64_t last_log; } s_diag;
+
 static size_t tex_bytes(const N64_Texture *t)
 {
     return (size_t)t->sw * t->sh * 4 + (t->track_alpha ? (size_t)t->sw * t->sh * 2 : 0);
@@ -612,8 +615,9 @@ static void copy(N64_RenderData *d, SDL_Texture *texture, const N64_CopyCmd *c, 
     int pass;
     const SDL_bool modulate = mod.r != 255 || mod.g != 255 || mod.b != 255 || mod.a != 255;
     float s0, t0, sw, sh, dx, dy, dw, dh;
-    if (!t || !resident(d, t)) return;
-    if (t == d->target) return;               /* drawing a target into itself */
+    if (!t || !resident(d, t)) { ++s_diag.skipped; return; }
+    if (t == d->target) { ++s_diag.skipped; return; }   /* drawing a target into itself */
+    ++s_diag.copies;
     merge_alpha(t);
 
     s0 = c->sx * t->fx; t0 = c->sy * t->fy;
@@ -626,7 +630,7 @@ static void copy(N64_RenderData *d, SDL_Texture *texture, const N64_CopyCmd *c, 
         sh *= (row_to - row_from);
         dh *= (row_to - row_from);
     }
-    if (sw < 0.5f || sh < 0.5f || dw <= 0 || dh <= 0) return;
+    if (sw < 0.5f || sh < 0.5f || dw <= 0 || dh <= 0) { ++s_diag.skipped; return; }
 
     SDL_zero(p);
     p.s0 = (int)s0; p.t0 = (int)t0;
@@ -689,6 +693,7 @@ static int N64R_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd, 
     N64_RenderData *d = (N64_RenderData *)renderer->driverdata;
     N64_Texture *want = renderer->target ? (N64_Texture *)renderer->target->driverdata : NULL;
     (void)vertsize;
+    ++s_diag.queues;
 
     /* A target that will be composited with blending needs its alpha tracked
        (the blend mode is usually set after the texture is created). */
@@ -863,12 +868,15 @@ static int N64R_RenderPresent(SDL_Renderer *renderer)
     d->display = NULL;
     d->target = keep;
     ++d->frame;
-    if (d->frame % 600 == 1) {
+    if (get_ticks() - s_diag.last_log > TICKS_PER_SECOND * 5ull) {
         int n = 0;
         N64_Texture *t;
         for (t = d->lru_head; t; t = t->next) ++n;
-        debugf("[n64render] frame %lu: %d textures resident, %lu of %lu KiB\n", (unsigned long)d->frame, n,
-               (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+        debugf("[n64render] frame %lu at %lu s: %u queues, %u copies (%u skipped), %d textures resident, %lu of %lu KiB\n",
+               (unsigned long)d->frame, (unsigned long)(get_ticks_ms() / 1000), s_diag.queues, s_diag.copies,
+               s_diag.skipped, n, (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+        SDL_zero(s_diag);
+        s_diag.last_log = get_ticks();
     }
     return 0;
 }
