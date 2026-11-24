@@ -40,6 +40,7 @@ typedef struct {
     uint32_t swapins;        // heap pages read back from swap
     uint32_t sd_writes;      // ... of which written to the SD swap file
     uint32_t sd_reads;       // ... of which read from the SD swap file
+    uint32_t discards;       // freed heap pages dropped (n64_pager_discard)
 } n64_pager_stats_t;
 
 void n64_pager_get_stats(n64_pager_stats_t* out);
@@ -53,6 +54,10 @@ void n64_pager_start_watchdog(void);
 
 // Size in bytes of the swappable heap at VH_BASE (0 if not available).
 uint32_t n64_pager_heap_size(void);
+
+// Tell the pager that the heap pages wholly inside [va, va + len) are free:
+// they are dropped without write-back and read as zero when next touched.
+void n64_pager_discard(uint32_t va, uint32_t len);
 
 #ifdef __cplusplus
 }

@@ -818,6 +818,18 @@ if(N64_BUILD)
     if(N64_HEAP_PROFILE)
         set_property(SOURCE src/n64/pager/n64_vheap.cpp APPEND PROPERTY COMPILE_DEFINITIONS "N64_HEAP_PROFILE=1")
     endif()
+    # -DN64_USB_LOG=OFF drops libdragon's USB log, which keeps the top 8 MiB of
+    # cartridge SDRAM for itself: the compressed swap then gets that space too.
+    option(N64_USB_LOG "Log over the flashcart's USB port (reserves 8 MiB of SDRAM)" ON)
+    if(NOT N64_USB_LOG)
+        set_property(SOURCE src/n64/pager/n64_pager.c src/n64/n64_main.cpp APPEND PROPERTY
+            COMPILE_DEFINITIONS "N64_NO_USB_LOG=1")
+    endif()
+    # Diagnostics: -DN64_SWAP_VERIFY=ON reads back and decodes every page written to swap.
+    option(N64_SWAP_VERIFY "Verify every compressed swap write (diagnostics)" OFF)
+    if(N64_SWAP_VERIFY)
+        set_property(SOURCE src/n64/pager/n64_pager.c APPEND PROPERTY COMPILE_DEFINITIONS "N64_SWAP_VERIFY=1")
+    endif()
     # Testing: -DN64_SWAP_AREA_LIMIT_MB=<n> caps the SDRAM swap area (as a bigger ROM would).
     set(N64_SWAP_AREA_LIMIT_MB "" CACHE STRING "Cap the SDRAM swap area (testing)")
     if(N64_SWAP_AREA_LIMIT_MB)

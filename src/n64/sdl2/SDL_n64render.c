@@ -151,6 +151,18 @@ static SDL_bool make_room(N64_RenderData *d, size_t need, N64_Texture *keep)
     return d->used + need <= d->budget;
 }
 
+/* A render target's CPU copy only matters while it is not resident: once
+   the RDRAM copy is up to date it is freed (and rebuilt by download() on
+   eviction), so screen-sized targets are not held twice. */
+static void drop_target_copy(N64_Texture *t)
+{
+    if (t->target && t->cpu && t->gpu.buffer) {
+        SDL_free(t->cpu);
+        t->cpu = NULL;
+        t->cpu_stale = SDL_TRUE;
+    }
+}
+
 /* Make sure t has an RDRAM copy that is up to date. */
 static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
 {
@@ -164,6 +176,7 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
             for (y = 0; y < t->sh; ++y)
                 SDL_memcpy((Uint8 *)t->gpu.buffer + y * t->gpu.stride, t->cpu + y * t->sw * 4, t->sw * 4);
             t->gpu_stale = SDL_FALSE;
+            drop_target_copy(t);
         }
         return SDL_TRUE;
     }
@@ -207,6 +220,7 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
     }
     t->gpu_stale = SDL_FALSE;
     t->alpha_dirty = SDL_FALSE;
+    drop_target_copy(t);
     return SDL_TRUE;
 }
 
@@ -307,6 +321,11 @@ static int N64R_UpdateTexture(SDL_Renderer *renderer, SDL_Texture *texture, cons
 {
     N64_Texture *t = (N64_Texture *)texture->driverdata;
     (void)renderer;
+    if (!t->cpu && t->gpu.buffer) {
+        /* resident target without a CPU copy: fetch its current contents */
+        rspq_wait();
+        download(t);
+    }
     if (!t->cpu) {
         t->cpu = (Uint8 *)SDL_calloc((size_t)t->sw * t->sh, 4);
         if (!t->cpu) return SDL_OutOfMemory();

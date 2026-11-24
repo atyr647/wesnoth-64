@@ -59,10 +59,18 @@ __attribute__((weak)) uint32_t n64_pager_frames_requested = 160;   // 2.5 MiB
 #define SC64_V2_IDENTIFIER  0x53437632u
 #define SC64_CMD_CONFIG_SET 'C'
 #define SC64_CFG_ROM_WRITE_ENABLE 1u
-// Swap: cartridge SDRAM from the end of the ROM image up to just below the
-// IS-Viewer window. The ROM's last TOC entry is an end marker ("rom.end",
-// added by n64_create_paged_rom), so the swap never overlaps ROM data.
+// Swap: cartridge SDRAM from the end of the ROM image up to the USB debug
+// area. The ROM's last TOC entry is an end marker ("rom.end", added by
+// n64_create_paged_rom), so the swap never overlaps ROM data. libdragon's USB
+// log (debug_init_usblog, used by n64_main) stages every debugf line in the
+// top 8 MiB of the 64 MiB cartridge space (usb.c DEBUG_ADDRESS, 0x13800000):
+// the swap must stop below it, or log output overwrites swapped pages.
+// A build without the USB log (N64_NO_USB_LOG) can use up to the IS-Viewer window.
+#ifdef N64_NO_USB_LOG
 #define SWAP_CART_END       0x13FC0000u
+#else
+#define SWAP_CART_END       0x13800000u
+#endif
 static uint32_t s_swap_base;
 
 static uint16_t s_pte[MAX_PAGES];            // page -> frame (NO_FRAME if absent)
@@ -221,13 +229,20 @@ static uint32_t pick_frame(void) {
 #define CS_CLASSES     (PG_SIZE / CS_UNIT)       // a page takes 1..16 units
 #define CS_RAW         0xFFFFu                   // clen: stored uncompressed
 #define CS_MAX_UNITS   65536u
-extern int decompress_lz4_full_fast(const void* inbuf, int insize, void* outbuf);   // libdragon
 static LZ4_stream_t s_lz4_state;
 static uint8_t s_cbuf[LZ4_COMPRESSBOUND(PG_SIZE) + 16] __attribute__((aligned(16)));
-static uint8_t s_dbuf[PG_SIZE + 16] __attribute__((aligned(16)));   // decoder may write 8 bytes past the end
+static uint8_t s_dbuf[PG_SIZE] __attribute__((aligned(16)));        // compaction bounce buffer
 static uint16_t s_slot[MAX_PAGES];             // first unit of the page's slot (0 = none)
 static uint8_t  s_sunits[MAX_PAGES];           // units the slot spans
 static uint16_t s_clen[MAX_PAGES];             // compressed bytes (CS_RAW: uncompressed)
+static uint32_t s_csum[MAX_PAGES];             // checksum of the stored bytes (integrity check)
+static inline uint32_t cs_checksum(const uint8_t* p, uint32_t n) {
+    uint32_t a = 1, b = 0;                     // Adler-style, cheap next to LZ4
+    for (uint32_t i = 0; i < n; ++i) { a += p[i]; b += a; if ((i & 2047) == 2047) { a %= 65521u; b %= 65521u; } }
+    return ((b % 65521u) << 16) | (a % 65521u);
+}
+// PI DMA transfers are kept to whole 8-byte multiples (the slot always has room).
+static inline uint32_t cs_dma_len(uint32_t n) { return (n + 7u) & ~7u; }
 static uint32_t s_cs_map[CS_MAX_UNITS / 32];   // allocation bitmap, 1 = used
 static uint32_t s_cs_units, s_cs_used, s_cs_rover = 1;
 static uint64_t s_cz_in, s_cz_out, s_cz_ticks;
@@ -347,8 +362,28 @@ static void cs_store(uint32_t page, const uint8_t* src) {
         s_slot[page] = cs_alloc(units);
     }
     s_sunits[page] = (uint8_t)units;
-    if (data == s_cbuf) data_cache_hit_writeback(s_cbuf, (n + 15) & ~15);
-    dma_write(data, cs_addr(s_slot[page]), (n + 1) & ~1);
+    if (data == s_cbuf) {
+        memset(s_cbuf + n, 0, cs_dma_len((uint32_t)n) - (uint32_t)n);
+        data_cache_hit_writeback(s_cbuf, (n + 15) & ~15);
+    }
+    s_csum[page] = cs_checksum(data, (uint32_t)n);
+    dma_write(data, cs_addr(s_slot[page]), cs_dma_len((uint32_t)n));
+#ifdef N64_SWAP_VERIFY
+    {   // read back what was just written (diagnostics)
+        static uint8_t vbuf[PG_SIZE + 16] __attribute__((aligned(16)));
+        data_cache_hit_writeback_invalidate(vbuf, sizeof vbuf);
+        dma_read(vbuf, cs_addr(s_slot[page]), cs_dma_len((uint32_t)n));
+        data_cache_hit_invalidate(vbuf, sizeof vbuf);
+        const uint32_t c = cs_checksum(vbuf, (uint32_t)n);
+        assertf(c == s_csum[page], "swap: write of page %lu did not stick (slot %u, %d bytes at %08lx)",
+                (unsigned long)page, s_slot[page], n, (unsigned long)cs_addr(s_slot[page]));
+        if (data == s_cbuf) {
+            const int got = LZ4_decompress_safe((const char*)s_cbuf, (char*)vbuf, n, (int)PG_SIZE);
+            assertf(got == (int)PG_SIZE && memcmp(vbuf, src, PG_SIZE) == 0,
+                    "swap: page %lu does not decompress to what was stored (%d)", (unsigned long)page, got);
+        }
+    }
+#endif
     s_cz_out += (uint64_t)units * CS_UNIT;
     s_cz_ticks += get_ticks() - t0;
 }
@@ -360,15 +395,35 @@ static void cs_load(uint32_t page, uint8_t* dst) {
         data_cache_hit_writeback_invalidate(dst, PG_SIZE);
         dma_read(dst, cs_addr(s_slot[page]), PG_SIZE);
         data_cache_hit_invalidate(dst, PG_SIZE);
+        const uint32_t c = cs_checksum(dst, PG_SIZE);
+        assertf(c == s_csum[page], "swap: raw page %lu changed in SDRAM (slot %u, %u units): %08lx != %08lx",
+                (unsigned long)page, s_slot[page], s_sunits[page], (unsigned long)c, (unsigned long)s_csum[page]);
         return;
     }
     const uint32_t n = s_clen[page];
     data_cache_hit_writeback_invalidate(s_cbuf, (n + 15) & ~15u);
-    dma_read(s_cbuf, cs_addr(s_slot[page]), (n + 1) & ~1u);
+    dma_read(s_cbuf, cs_addr(s_slot[page]), cs_dma_len(n));
     data_cache_hit_invalidate(s_cbuf, (n + 15) & ~15u);
-    const int got = decompress_lz4_full_fast(s_cbuf, (int)n, s_dbuf);
+    {
+        const uint32_t c = cs_checksum(s_cbuf, n);
+        if (c != s_csum[page]) {
+            // read it again: a transfer problem, or the stored bytes changed?
+            data_cache_hit_writeback_invalidate(s_cbuf, (n + 15) & ~15u);
+            dma_read(s_cbuf, cs_addr(s_slot[page]), cs_dma_len(n));
+            data_cache_hit_invalidate(s_cbuf, (n + 15) & ~15u);
+            const uint32_t c2 = cs_checksum(s_cbuf, n);
+            assertf(0, "swap: page %lu changed in SDRAM (slot %u, %u units, %lu bytes at %08lx): "
+                       "%08lx then %08lx, stored %08lx",
+                    (unsigned long)page, s_slot[page], s_sunits[page], (unsigned long)n,
+                    (unsigned long)cs_addr(s_slot[page]), (unsigned long)c, (unsigned long)c2,
+                    (unsigned long)s_csum[page]);
+        }
+    }
+    // The reference decoder (bounds-checked, decodes straight into the frame).
+    // libdragon's assembly fast decoder was used before and mis-decoded some
+    // nearly incompressible pages.
+    const int got = LZ4_decompress_safe((const char*)s_cbuf, (char*)dst, (int)n, (int)PG_SIZE);
     assertf(got == (int)PG_SIZE, "swap: corrupt compressed page %lu (%d bytes)", (unsigned long)page, got);
-    memcpy(dst, s_dbuf, PG_SIZE);
 }
 
 static void evict(uint32_t fi) {
@@ -563,6 +618,34 @@ static void pager_init(void) {
 
 uint32_t n64_pager_heap_size(void) { pager_init(); return s_nheap * PG_SIZE; }
 
+// The heap pages wholly inside [va, va + len) hold no live data any more:
+// drop them (no write-back, swap slot released); the next touch maps a fresh
+// zero page. Keeps freed memory from occupying compressed swap.
+void n64_pager_discard(uint32_t va, uint32_t len) {
+    va &= 0xFFFFFFFFu;
+    uint32_t first = (va + PG_SIZE - 1) & ~(PG_SIZE - 1), last = (va + len) & ~(PG_SIZE - 1);
+    if (!s_ready || first >= last) return;
+    for (uint32_t a = first; a < last; a += PG_SIZE) {
+        int32_t pg = va_page(a);
+        if (pg < 0 || !is_heap((uint32_t)pg)) continue;
+        const uint32_t page = (uint32_t)pg;
+        if (on_sd(page)) continue;                  // SD swap file: nothing to reclaim
+        uint32_t sr = C0_STATUS();
+        C0_WRITE_STATUS(sr & ~1u);
+        if (s_pte[page] != NO_FRAME) {
+            s_frames[s_pte[page]].page = -1;
+            s_pte[page] = NO_FRAME;
+            --s_stats.resident;
+        }
+        s_flags[page] = 0;
+        tlb_set_pair(page, 0);                      // invalidate a cached mapping
+        cs_release(page);
+        s_clen[page] = 0;
+        ++s_stats.discards;
+        C0_WRITE_STATUS(sr);
+    }
+}
+
 void n64_pager_get_stats(n64_pager_stats_t* out) { *out = s_stats; }
 
 // libdragon's entry point calls __do_global_ctors, which the link redirects
@@ -619,13 +702,14 @@ static void watchdog_cb(int ovfl)
     (void)ovfl;
     uint32_t epc;
     asm volatile("mfc0 %0,$14" : "=r"(epc));
-    debugf("[watchdog] heap %u KiB  pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu  sd w+%lu r+%lu\n",
+    debugf("[watchdog] heap %u KiB  pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu  discards +%lu  sd w+%lu r+%lu\n",
            n64_vheap_live_kib(), (unsigned long)epc,
            (unsigned long)(s_stats.faults - s_wd_last.faults),
            (unsigned long)(s_stats.refills - s_wd_last.refills),
            (unsigned long)(s_stats.evictions - s_wd_last.evictions),
            (unsigned long)(s_stats.writebacks - s_wd_last.writebacks),
            (unsigned long)(s_stats.swapins - s_wd_last.swapins),
+           (unsigned long)(s_stats.discards - s_wd_last.discards),
            (unsigned long)(s_stats.sd_writes - s_wd_last.sd_writes),
            (unsigned long)(s_stats.sd_reads - s_wd_last.sd_reads));
     s_wd_last = s_stats;

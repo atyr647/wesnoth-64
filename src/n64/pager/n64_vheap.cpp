@@ -187,6 +187,7 @@ void* large_alloc(uint32_t want) {
 void large_free(void* p) {
     Block* b = block_of(p);
     uint32_t size = b->size();
+    const uintptr_t freed_lo = reinterpret_cast<uintptr_t>(b), freed_hi = freed_lo + size;
     uint32_t prev_flag = b->size_flags & kPrevUse;
     // Merge with the next block if free.
     Block* n = b->after();
@@ -201,6 +202,17 @@ void large_free(void* p) {
     }
     set_free(b, size, prev_flag);
     bin_insert(b);
+    // Whole pages of the merged free block around the freed one no longer
+    // hold data: let the pager drop them instead of swapping them. The block
+    // header and free-list links (first 16 bytes) and the next block's
+    // prev_size (at the end) stay.
+    if (size >= 2 * kPage) {
+        const uintptr_t lo = reinterpret_cast<uintptr_t>(b) + 16, hi = reinterpret_cast<uintptr_t>(b) + size;
+        uintptr_t a = freed_lo > kPage ? freed_lo - kPage : 0, e = freed_hi + kPage;
+        if (a < lo) a = lo;
+        if (e > hi) e = hi;
+        if (e > a + kPage) n64_pager_discard(static_cast<uint32_t>(a), static_cast<uint32_t>(e - a));
+    }
 }
 
 size_t usable(void* p) {

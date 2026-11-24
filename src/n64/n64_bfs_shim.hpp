@@ -619,13 +619,43 @@ private:
     std::unique_ptr<n64vfs::istreambuf> buf_;
 };
 
+// Written to the file in 64 KiB pieces as it fills (the device already
+// created or truncated it), so a large file -- the config cache is tens of
+// MB of WML -- is never held in memory whole.
 template<> class stream<file_descriptor_sink> : public std::ostream {
 public:
     stream(const file_descriptor_sink& d, std::streamsize = 0, std::streamsize = 0)
-        : std::ostream(&buf_), dev_(d) {}
-    ~stream() override { n64vfs::write(dev_.path(), buf_.str(), dev_.append()); }
+        : std::ostream(nullptr), buf_(d.path()), dev_(d) { rdbuf(&buf_); }
+    ~stream() override { buf_.pubsync(); }
 private:
-    std::stringbuf buf_;
+    class chunkbuf : public std::streambuf {
+    public:
+        explicit chunkbuf(std::string path) : path_(std::move(path)) {
+            data_.resize(65536);
+            setp(data_.data(), data_.data() + data_.size());
+        }
+    protected:
+        int_type overflow(int_type c) override {
+            if (!flush_out()) return traits_type::eof();
+            if (!traits_type::eq_int_type(c, traits_type::eof())) {
+                *pptr() = traits_type::to_char_type(c);
+                pbump(1);
+            }
+            return traits_type::not_eof(c);
+        }
+        int sync() override { return flush_out() ? 0 : -1; }
+    private:
+        bool flush_out() {
+            const std::ptrdiff_t n = pptr() - pbase();
+            if (n > 0 && !n64vfs::write(path_, std::string(pbase(), static_cast<std::size_t>(n)), true))
+                return false;
+            setp(data_.data(), data_.data() + data_.size());
+            return true;
+        }
+        std::string path_;
+        std::string data_;
+    };
+    chunkbuf buf_;
     file_descriptor_sink dev_;
 };
 

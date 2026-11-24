@@ -312,6 +312,13 @@ void game_config_manager::load_game_config(bool reload_everything, const game_cl
 				validator->set_create_exceptions(false); // Don't crash if there's an error, just go ahead anyway
 			}
 
+#ifdef N64_BUILD
+			// Free the previous game config before building the new one, so
+			// the two are never in memory together (the console's heap would
+			// otherwise need room for both: the main menu's and a campaign's).
+			// Everything that refers into it is set up again below.
+			game_config_.clear();
+#endif
 			game_config_ = cache_.get_config(filesystem::get_wml_location(wml_tree_root).value(), validator.get());
 			game_config_.append(valid_cores);
 

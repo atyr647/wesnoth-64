@@ -103,7 +103,11 @@ int main() {
 #endif
     // --- Phase 0: Hardware init ---
     debug_init_isviewer();       // USB debug output (ISViewer/64drive)
+#ifndef N64_NO_USB_LOG
+    // Uses the top 8 MiB of cartridge SDRAM (0x13800000); the pager's swap
+    // stops below it (n64_pager.c SWAP_CART_END).
     debug_init_usblog();         // USB log buffer
+#endif
 
     N64_LOG("Wesnoth N64 starting up...");
     check_expansion_pak();
