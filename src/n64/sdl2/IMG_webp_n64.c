@@ -14,6 +14,9 @@
  *    map markers placed in image coordinates -- is unchanged; the screen is
  *    640x240 anyway.
  *
+ *  - Images shrunk ahead of time by tools/n64-prescale-images.py carry their
+ *    original size in a trailing "N64O" chunk, handled the same way.
+ *
  * Animated WebP is not supported (Wesnoth does not use it).
  */
 #include "SDL_image.h"
@@ -74,6 +77,16 @@ SDL_Surface *IMG_LoadWEBP_RW(SDL_RWops *src)
         config.options.use_scaling = 1;
         config.options.scaled_width = surface->w;
         config.options.scaled_height = surface->h;
+    }
+    /* Shrunk when the SD card was prepared (tools/n64-prescale-images.py):
+       the original size is in a trailing "N64O" chunk. */
+    if (size >= 16 && SDL_memcmp(data + size - 16, "N64O", 4) == 0) {
+        const Uint8 *p = data + size - 8;
+        w = (int)((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]);
+        h = (int)((p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7]);
+        k = 2;
+    }
+    if (k > 1) {
         surface->userdata = (void *)(uintptr_t)(0x80000000u | ((Uint32)(w & 0x7FFF) << 16) | (Uint32)(h & 0xFFFF));
     }
     /* ARGB8888 in memory on a big-endian CPU is A,R,G,B bytes */

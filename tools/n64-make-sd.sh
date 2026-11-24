@@ -2,8 +2,9 @@
 # Prepare the SummerCart64 SD card contents for the N64 port.
 #
 # The game reads its data from the SD card exactly as the PC game reads it
-# from disk: directory "wesnoth" on the card holds an unmodified copy of the
-# data tree (data/, images/, sounds/, fonts/). User data (preferences, saves)
+# from disk: directory "wesnoth" on the card holds a copy of the data tree
+# (data/, images/, sounds/, fonts/), unmodified except that WebP images above
+# 0.7 megapixels are shrunk (tools/n64-prescale-images.py). User data (preferences, saves)
 # goes to "wesnoth-userdata", created on first start.
 #
 #   tools/n64-make-sd.sh dir  <mount-point-of-sd-card>
@@ -25,6 +26,9 @@ stage() {   # stage <dir>: wesnoth/ tree with exclusions applied (hard links)
     for t in "${TREE[@]}"; do cp -al "$ROOT/$t" "$out/wesnoth/$t"; done
     for x in ${WESNOTH_SD_EXCLUDE:-}; do rm -rf "$out/wesnoth/$x"; done
     find "$out/wesnoth" -name '.*' -prune -exec rm -rf {} +
+    # Oversized WebP images take minutes to decode on the console: shrink them
+    # (the game still lays them out at their original size).
+    python3 "$ROOT/tools/n64-prescale-images.py" "$out/wesnoth"
 }
 
 case "$MODE" in
