@@ -20,9 +20,12 @@
 
 #pragma once
 
+#include "utils/interned_string.hpp"
 #include "animated.hpp"
 #include "map/location.hpp"
 #include "terrain/translation.hpp"
+
+#include <map>
 
 class config;
 class game_config_view;
@@ -72,6 +75,48 @@ public:
 	 * the base data type returned by the get_terrain_at method.
 	 */
 	typedef std::vector<animated<image::locator>> imagelist;
+
+#ifdef N64_BUILD
+	/**
+	 * A terrain match shared by every constraint that has the same one (the
+	 * rotated copies of a rule all do): the console keeps one pooled copy of
+	 * each distinct match instead of three lists per constraint.
+	 */
+	class pooled_ter_match
+	{
+	public:
+		pooled_ter_match() : match_(&intern(t_translation::ter_match())) {}
+		pooled_ter_match& operator=(const t_translation::ter_match& m) { match_ = &intern(m); return *this; }
+		operator const t_translation::ter_match&() const { return *match_; }
+		const t_translation::ter_match* operator->() const { return match_; }
+
+	private:
+		static const t_translation::ter_match& intern(const t_translation::ter_match& m)
+		{
+			// key: the three code lists and the two flags, as raw bytes
+			std::string key;
+			for(const t_translation::ter_list* l : {&m.terrain, &m.mask, &m.masked_terrain}) {
+				const std::size_t n = l->size();
+				key.append(reinterpret_cast<const char*>(&n), sizeof n);
+				key.append(reinterpret_cast<const char*>(l->data()), n * sizeof(t_translation::terrain_code));
+			}
+			key += char(m.has_wildcard);
+			key += char(m.is_empty);
+			static auto* pool = new std::map<std::string, t_translation::ter_match>();   // never destroyed
+			return pool->try_emplace(std::move(key), m).first->second;
+		}
+
+		const t_translation::ter_match* match_;
+	};
+	typedef pooled_ter_match match_type;
+
+	/** Flag names of the rules: pooled on the console, where thousands of
+	 *  rules (and their rotated copies) repeat the same few names. */
+	typedef std::vector<utils::interned_string> flag_list;
+#else
+	typedef t_translation::ter_match match_type;
+	typedef std::vector<std::string> flag_list;
+#endif
 
 	/** Constructor for the terrain_builder class.
 	 *
@@ -209,7 +254,7 @@ public:
 		/** The Time of Day associated to this variant (if any)*/
 		std::set<std::string> tods;
 
-		std::vector<std::string> has_flag;
+		flag_list has_flag;
 
 		/** Specify the allowed amount of random shift (in milliseconds) applied
 		 * to the animation start time, -1 for shifting without limitation.*/
@@ -264,10 +309,10 @@ public:
 	struct terrain_constraint
 	{
 		map_location loc{};
-		t_translation::ter_match terrain_types_match{};
-		std::vector<std::string> set_flag{};
-		std::vector<std::string> no_flag{};
-		std::vector<std::string> has_flag{};
+		match_type terrain_types_match{};
+		flag_list set_flag{};
+		flag_list no_flag{};
+		flag_list has_flag{};
 
 		/** Whether to actually draw the images onto this hex or not */
 		bool no_draw = false;

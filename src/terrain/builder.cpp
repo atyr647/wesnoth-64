@@ -595,14 +595,20 @@ void terrain_builder::replace_rotate_tokens(building_rule& rule, int angle, cons
 {
 	for(terrain_constraint& cons : rule.constraints) {
 		// Transforms attributes
-		for(std::string& flag : cons.set_flag) {
+		for(auto& flag_entry : cons.set_flag) {
+			std::string flag = flag_entry;
 			replace_rotate_tokens(flag, angle, replacement);
+			flag_entry = std::move(flag);
 		}
-		for(std::string& flag : cons.no_flag) {
+		for(auto& flag_entry : cons.no_flag) {
+			std::string flag = flag_entry;
 			replace_rotate_tokens(flag, angle, replacement);
+			flag_entry = std::move(flag);
 		}
-		for(std::string& flag : cons.has_flag) {
+		for(auto& flag_entry : cons.has_flag) {
+			std::string flag = flag_entry;
 			replace_rotate_tokens(flag, angle, replacement);
+			flag_entry = std::move(flag);
 		}
 		replace_rotate_tokens(cons.images, angle, replacement);
 	}
@@ -667,7 +673,8 @@ terrain_builder::rule_image_variant::rule_image_variant(const std::string& image
 	, random_start(random_start)
 {
 	if(!has_flag.empty()) {
-		this->has_flag = utils::split(has_flag);
+		const std::vector<std::string> flags = utils::split(has_flag);
+		this->has_flag.assign(flags.begin(), flags.end());
 	}
 	if(!tod.empty()) {
 		const std::vector<std::string> tod_list = utils::split(tod);
@@ -984,16 +991,16 @@ void terrain_builder::parse_config(const game_config_view& cfg, bool local)
 		    constraint != rule->second.constraints.end(); ++constraint) {
 
 			PLAIN_LOG << ">>>> New constraint: location = (" << constraint->second.loc
-			          << "), terrain types = '" << t_translation::write_list(constraint->second.terrain_types_match.terrain) << "'";
+			          << "), terrain types = '" << t_translation::write_list(static_cast<const t_translation::ter_match&>(constraint->second.terrain_types_match).terrain) << "'";
 
-			std::vector<std::string>::const_iterator flag;
+			flag_list::const_iterator flag;
 
 			for(flag  = constraint->second.set_flag.begin(); flag != constraint->second.set_flag.end(); ++flag) {
-				PLAIN_LOG << ">>>>>> Set_flag: " << *flag;
+				PLAIN_LOG << ">>>>>> Set_flag: " << static_cast<const std::string&>(*flag);
 			}
 
 			for(flag = constraint->second.no_flag.begin(); flag != constraint->second.no_flag.end(); ++flag) {
-				PLAIN_LOG << ">>>>>> No_flag: " << *flag;
+				PLAIN_LOG << ">>>>>> No_flag: " << static_cast<const std::string&>(*flag);
 			}
 		}
 
