@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 #include <malloc.h>
 #include <new>
 
@@ -213,7 +214,19 @@ size_t usable(void* p) {
 // ---------------------------------------------------------------- public C API
 static size_t s_live;            // bytes in live allocations (usable sizes)
 
-extern "C" void* n64_vmalloc(size_t n) {
+#ifdef N64_HEAP_PROFILE
+static void* raw_vmalloc(size_t n);
+static void raw_vfree(void* p);
+static void* raw_vrealloc(void* p, size_t n);
+#define n64_vmalloc raw_vmalloc
+#define n64_vfree raw_vfree
+#define n64_vrealloc raw_vrealloc
+#define EXTERN_C static
+#else
+#define EXTERN_C extern "C"
+#endif
+
+EXTERN_C void* n64_vmalloc(size_t n) {
     init();
     if (!s_size) return std::malloc(n);
     if (n == 0) n = 1;
@@ -223,15 +236,7 @@ extern "C" void* n64_vmalloc(size_t n) {
     return p;
 }
 
-extern "C" void* n64_vcalloc(size_t n, size_t size) {
-    const size_t bytes = n * size;
-    if (size && bytes / size != n) return nullptr;
-    void* p = n64_vmalloc(bytes);
-    if (p) std::memset(p, 0, bytes);
-    return p;
-}
-
-extern "C" void n64_vfree(void* p) {
+EXTERN_C void n64_vfree(void* p) {
     if (!p) return;
     if (!in_heap(p)) { std::free(p); return; }
     s_live -= usable(p);
@@ -240,7 +245,7 @@ extern "C" void n64_vfree(void* p) {
     else if (kind != kUnused) small_free(p, kind - 1u);
 }
 
-extern "C" void* n64_vrealloc(void* p, size_t n) {
+EXTERN_C void* n64_vrealloc(void* p, size_t n) {
     if (!p) return n64_vmalloc(n);
     if (n == 0) { n64_vfree(p); return nullptr; }
     if (!in_heap(p)) return std::realloc(p, n);
@@ -253,9 +258,120 @@ extern "C" void* n64_vrealloc(void* p, size_t n) {
     return q;
 }
 
+#ifdef N64_HEAP_PROFILE
+#undef n64_vmalloc
+#undef n64_vfree
+#undef n64_vrealloc
+// ---------------------------------------------------------------------------
+// Heap profile (diagnostics build): every allocation carries an 8-byte header
+// with the allocating call site's bucket; live bytes are kept per call site
+// and the largest are logged at each [vheap] mark.
+// ---------------------------------------------------------------------------
+namespace {
+constexpr uint32_t kSites = 2048;
+struct site { uint32_t ra; int32_t bytes; int32_t count; };
+site s_sites[kSites];
+struct hdr { uint16_t site; uint16_t back; uint32_t size; };
+uint16_t site_of(uint32_t ra) {
+    uint32_t h = (ra >> 2) * 2654435761u >> 21;
+    for (uint32_t i = 0; i < kSites; ++i) {
+        site& e = s_sites[(h + i) & (kSites - 1)];
+        if (e.ra == ra) return (uint16_t)((h + i) & (kSites - 1));
+        if (e.ra == 0) { e.ra = ra; return (uint16_t)((h + i) & (kSites - 1)); }
+    }
+    return 0;
+}
+void* prof_alloc(size_t n, uint32_t ra) {
+    uint8_t* raw = static_cast<uint8_t*>(raw_vmalloc(n + 8));
+    if (!raw) return nullptr;
+    hdr* h = reinterpret_cast<hdr*>(raw);
+    h->site = site_of(ra);
+    h->back = 0;
+    h->size = (uint32_t)n;
+    s_sites[h->site].bytes += (int32_t)n;
+    s_sites[h->site].count += 1;
+    return raw + 8;
+}
+uint8_t* raw_of(void* p) {
+    hdr* h = reinterpret_cast<hdr*>(static_cast<uint8_t*>(p) - 8);
+    return reinterpret_cast<uint8_t*>(h) - h->back;
+}
+void prof_free(void* p) {
+    hdr* h = reinterpret_cast<hdr*>(static_cast<uint8_t*>(p) - 8);
+    site& e = s_sites[h->site];
+    e.bytes -= (int32_t)h->size;
+    e.count -= 1;
+    raw_vfree(raw_of(p));
+}
+} // namespace
+
+extern "C" void* n64_vmalloc(size_t n) {
+    init();
+    if (!s_size) return std::malloc(n);
+    return prof_alloc(n, (uint32_t)(uintptr_t)__builtin_return_address(0));
+}
+extern "C" void n64_vfree(void* p) {
+    if (!p) return;
+    if (!in_heap(p)) { std::free(p); return; }
+    prof_free(p);
+}
+extern "C" void* n64_vrealloc(void* p, size_t n) {
+    if (!p) return n64_vmalloc(n);
+    if (n == 0) { n64_vfree(p); return nullptr; }
+    if (!in_heap(p)) return std::realloc(p, n);
+    hdr* h = reinterpret_cast<hdr*>(static_cast<uint8_t*>(p) - 8);
+    void* q = prof_alloc(n, s_sites[h->site].ra);
+    if (!q) return nullptr;
+    std::memcpy(q, p, h->size < n ? h->size : n);
+    prof_free(p);
+    return q;
+}
+static void* vmalloc_aligned_prof(size_t n, size_t align, uint32_t ra) {
+    uint8_t* u = static_cast<uint8_t*>(prof_alloc(n + align, ra));
+    if (!u) return nullptr;
+    uintptr_t a = (reinterpret_cast<uintptr_t>(u) + align - 1) & ~(uintptr_t)(align - 1);
+    if (a != reinterpret_cast<uintptr_t>(u)) {
+        hdr* h0 = reinterpret_cast<hdr*>(u - 8);
+        hdr* h = reinterpret_cast<hdr*>(a - 8);
+        const hdr copy = *h0;
+        *h = copy;
+        h->back = (uint16_t)(a - reinterpret_cast<uintptr_t>(u));
+    }
+    return reinterpret_cast<void*>(a);
+}
+extern "C" void n64_vheap_profile_dump(const char* why) {
+    static site top[40];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < kSites; ++i) {
+        const site& e = s_sites[i];
+        if (!e.ra || e.bytes < 32 * 1024) continue;
+        uint32_t k = n < 40 ? n++ : 39;
+        if (k == 39 && n == 40 && top[39].bytes >= e.bytes) continue;
+        top[k] = e;
+        while (k > 0 && top[k - 1].bytes < top[k].bytes) { site t = top[k - 1]; top[k - 1] = top[k]; top[k] = t; --k; }
+    }
+    std::fprintf(stderr, "[heapprof] %s: top call sites by live bytes\n", why);
+    for (uint32_t i = 0; i < n; ++i)
+        std::fprintf(stderr, "[heapprof]   %08lx %7ld KiB %7ld blocks\n", (unsigned long)top[i].ra,
+                     (long)(top[i].bytes >> 10), (long)top[i].count);
+}
+#endif
+
+extern "C" void* n64_vcalloc(size_t n, size_t size) {
+    const size_t bytes = n * size;
+    if (size && bytes / size != n) return nullptr;
+    void* p = n64_vmalloc(bytes);
+    if (p) std::memset(p, 0, bytes);
+    return p;
+}
+
 // Over-aligned allocations (rare): a large block with the payload moved up to
 // the alignment; the gap in front becomes its own free block.
 static void* vmalloc_aligned(size_t n, size_t align) {
+#ifdef N64_HEAP_PROFILE
+    init();
+    if (s_size) return vmalloc_aligned_prof(n, align < 8 ? 8 : align, (uint32_t)(uintptr_t)__builtin_return_address(0));
+#endif
     if (align <= 8) return n64_vmalloc(n);
     init();
     if (!s_size) return memalign(align, n);
@@ -304,7 +420,12 @@ void n64_vheap_progress(uint32_t pages) {
 
 // ---------------------------------------------------------------- operator new
 void* operator new(size_t n) {
+#ifdef N64_HEAP_PROFILE
+    init();
+    void* p = s_size ? prof_alloc(n, (uint32_t)(uintptr_t)__builtin_return_address(0)) : std::malloc(n);
+#else
     void* p = n64_vmalloc(n);
+#endif
     if (!p) { n64_vheap_report(n); throw std::bad_alloc(); }
     return p;
 }
@@ -333,7 +454,12 @@ void operator delete[](void* p, size_t, std::align_val_t) noexcept { n64_vfree(p
 
 // Diagnostics: log the bytes in live allocations, with a label.
 extern "C" void n64_vheap_mark(const char* what, int stage) {
+    static int last = -1;
     std::fprintf(stderr, "[vheap] mark %s %d: %u KiB live, %u MiB reserved, at %u s\n", what, stage,
                  (unsigned)(s_live >> 10), (unsigned)(s_top * kPage >> 20), (unsigned)(get_ticks_ms() / 1000));
+#ifdef N64_HEAP_PROFILE
+    if (stage != last) n64_vheap_profile_dump(what);
+#endif
+    last = stage;
 }
 extern "C" unsigned n64_vheap_live_kib(void) { return (unsigned)(s_live >> 10); }

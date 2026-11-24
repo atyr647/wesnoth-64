@@ -813,6 +813,11 @@ if(N64_BUILD)
     # LZ4 compressor for the pager's compressed swap (resident, see n64_paged.ld).
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
     set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2")
+    # Diagnostics: -DN64_HEAP_PROFILE=ON logs the call sites holding the most heap.
+    option(N64_HEAP_PROFILE "Heap profile by call site (diagnostics)" OFF)
+    if(N64_HEAP_PROFILE)
+        set_property(SOURCE src/n64/pager/n64_vheap.cpp APPEND PROPERTY COMPILE_DEFINITIONS "N64_HEAP_PROFILE=1")
+    endif()
     # Testing: -DN64_SWAP_AREA_LIMIT_MB=<n> caps the SDRAM swap area (as a bigger ROM would).
     set(N64_SWAP_AREA_LIMIT_MB "" CACHE STRING "Cap the SDRAM swap area (testing)")
     if(N64_SWAP_AREA_LIMIT_MB)

@@ -535,6 +535,7 @@ int main(void) {
 #include <timer.h>
 static n64_pager_stats_t s_wd_last;
 extern unsigned n64_vheap_live_kib(void);
+extern void n64_vheap_profile_dump(const char* why) __attribute__((weak));
 static void watchdog_cb(int ovfl)
 {
     (void)ovfl;
@@ -550,6 +551,8 @@ static void watchdog_cb(int ovfl)
            (unsigned long)(s_stats.sd_writes - s_wd_last.sd_writes),
            (unsigned long)(s_stats.sd_reads - s_wd_last.sd_reads));
     s_wd_last = s_stats;
+    static unsigned ticks;
+    if (n64_vheap_profile_dump && ++ticks % 8 == 0) n64_vheap_profile_dump("periodic");
     if (s_cz_in)
         debugf("[watchdog] compressed swap (virtual heap %lu MiB): %lu KiB of %lu KiB used; written %lu KiB as %lu KiB (%lu%%), %lu us per page\n",
                (unsigned long)((s_nsdram * PG_SIZE) >> 20),
