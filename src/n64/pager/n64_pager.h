@@ -38,9 +38,15 @@ typedef struct {
     uint32_t heap_pages;     // swappable heap size in pages (0 without SC64)
     uint32_t writebacks;     // dirty heap pages written to swap
     uint32_t swapins;        // heap pages read back from swap
+    uint32_t sd_writes;      // ... of which written to the SD swap file
+    uint32_t sd_reads;       // ... of which read from the SD swap file
 } n64_pager_stats_t;
 
 void n64_pager_get_stats(n64_pager_stats_t* out);
+
+// Attach a swap file on the mounted SD card (FatFs path) for the part of the
+// heap that does not fit in the cartridge SDRAM. Returns non-zero on success.
+int n64_pager_attach_sd_swap(const char* path);
 
 // Log the interrupted PC and pager counters every 15 s (diagnostics).
 void n64_pager_start_watchdog(void);

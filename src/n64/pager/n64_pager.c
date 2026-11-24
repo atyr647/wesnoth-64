@@ -45,7 +45,7 @@ __attribute__((weak)) uint32_t n64_pager_frames_requested = 160;   // 2.5 MiB
 //   heap  VH_BASE  (0xD0000000)  read/write, zero on first touch, backed by
 //                               SummerCart64 SDRAM (swap) beyond the ROM
 // ---------------------------------------------------------------------------
-#define MAX_PAGES 6144u          // 96 MiB of virtual space
+#define MAX_PAGES 8192u          // 128 MiB of virtual space
 #define NO_FRAME  0xFFFFu
 #define F_DIRTY   1u             // heap page modified since loaded
 #define F_SWAPPED 2u             // heap page has a copy in swap
@@ -86,6 +86,35 @@ static inline int32_t va_page(uint32_t va) {
     return -1;
 }
 static inline uint32_t swap_addr(uint32_t page) { return s_swap_base + (page - s_ncode) * PG_SIZE; }
+
+// Heap pages beyond what the cartridge SDRAM holds swap to a file on the SD
+// card (attached after the card is mounted, see n64_pager_attach_sd_swap).
+#define SD_SWAP_MAX_PAGES   4096u            /* 64 MiB */
+#define SD_UNIT             4096u            /* swap file mapped in 4 KiB units */
+static uint32_t  s_nsdram;                   // heap pages backed by SDRAM
+static uint32_t* s_sd_lba;                   // first sector of each 4 KiB unit of the swap file
+static uint32_t  s_sd_pages;                 // pages the attached swap file holds
+static inline int on_sd(uint32_t page) { return page >= s_ncode + s_nsdram; }
+extern int cart_card_rd_dram(void* dram, uint32_t lba, uint32_t count);      // libdragon libcart
+extern int cart_card_wr_dram(const void* dram, uint32_t lba, uint32_t count);
+
+// Read/write one page of the SD swap file, merging contiguous units.
+static void sd_page_io(uint32_t page, uint8_t* ram, int write) {
+    const uint32_t idx = page - s_ncode - s_nsdram;
+    assertf(s_sd_lba && idx < s_sd_pages,
+            "out of swap: the heap outgrew the cartridge SDRAM and no SD swap file is attached (page %lu)",
+            (unsigned long)idx);
+    const uint32_t* lba = s_sd_lba + idx * (PG_SIZE / SD_UNIT);
+    const uint32_t units = PG_SIZE / SD_UNIT, spu = SD_UNIT / 512;
+    for (uint32_t u = 0; u < units;) {
+        uint32_t n = 1;
+        while (u + n < units && lba[u + n] == lba[u] + n * spu) ++n;
+        int err = write ? cart_card_wr_dram(ram + u * SD_UNIT, lba[u], n * spu)
+                        : cart_card_rd_dram(ram + u * SD_UNIT, lba[u], n * spu);
+        assertf(err == 0, "SD swap %s failed (sector %lu)", write ? "write" : "read", (unsigned long)lba[u]);
+        u += n;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // TLB helpers
@@ -189,8 +218,9 @@ static void evict(uint32_t fi) {
     tlb_set_pair(old, 0);                        // drop the mapping if cached
     if (is_heap(old) && (s_flags[old] & F_DIRTY)) {
         uint8_t* src = s_pool + fi * PG_SIZE;
-        data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM
-        dma_write(src, swap_addr(old), PG_SIZE);
+        data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM / SD
+        if (on_sd(old)) { sd_page_io(old, src, 1); ++s_stats.sd_writes; }
+        else dma_write(src, swap_addr(old), PG_SIZE);
         s_flags[old] = (uint8_t)((s_flags[old] & ~F_DIRTY) | F_SWAPPED);
         ++s_stats.writebacks;
     }
@@ -211,7 +241,8 @@ static void load_page(uint32_t page) {
         inst_cache_hit_invalidate(dst, PG_SIZE);
     } else if (s_flags[page] & F_SWAPPED) {
         data_cache_hit_writeback_invalidate(dst, PG_SIZE);
-        dma_read(dst, swap_addr(page), PG_SIZE);
+        if (on_sd(page)) { sd_page_io(page, dst, 0); ++s_stats.sd_reads; }
+        else dma_read(dst, swap_addr(page), PG_SIZE);
         data_cache_hit_invalidate(dst, PG_SIZE);
         ++s_stats.swapins;
     } else {
@@ -323,7 +354,13 @@ static void pager_init(void) {
     uint32_t rom_end = rompak_search_ext(".end");
     s_swap_base = rom_end ? ((rom_end + 64 + 0xFFFFu) & ~0xFFFFu) : 0;
     if (s_swap_base && s_swap_base < SWAP_CART_END && sc64_enable_sdram_writes()) {
-        s_nheap = (SWAP_CART_END - s_swap_base) / PG_SIZE;
+        s_nsdram = ((SWAP_CART_END - s_swap_base) / PG_SIZE) & ~1u;
+        if (s_ncode + s_nsdram > MAX_PAGES) s_nsdram = (MAX_PAGES - s_ncode) & ~1u;
+#ifdef N64_SDRAM_SWAP_LIMIT_MB   /* testing: force most of the heap onto the SD swap file */
+        if (s_nsdram > N64_SDRAM_SWAP_LIMIT_MB * 64u) s_nsdram = N64_SDRAM_SWAP_LIMIT_MB * 64u;
+#endif
+        // Virtual heap = SDRAM part + SD part (usable once the swap file is attached).
+        s_nheap = s_nsdram + SD_SWAP_MAX_PAGES;
         if (s_ncode + s_nheap > MAX_PAGES) s_nheap = MAX_PAGES - s_ncode;
         s_nheap &= ~1u;
     }
@@ -403,13 +440,15 @@ static void watchdog_cb(int ovfl)
     (void)ovfl;
     uint32_t epc;
     asm volatile("mfc0 %0,$14" : "=r"(epc));
-    debugf("[watchdog] pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu\n",
+    debugf("[watchdog] pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu  sd w+%lu r+%lu\n",
            (unsigned long)epc,
            (unsigned long)(s_stats.faults - s_wd_last.faults),
            (unsigned long)(s_stats.refills - s_wd_last.refills),
            (unsigned long)(s_stats.evictions - s_wd_last.evictions),
            (unsigned long)(s_stats.writebacks - s_wd_last.writebacks),
-           (unsigned long)(s_stats.swapins - s_wd_last.swapins));
+           (unsigned long)(s_stats.swapins - s_wd_last.swapins),
+           (unsigned long)(s_stats.sd_writes - s_wd_last.sd_writes),
+           (unsigned long)(s_stats.sd_reads - s_wd_last.sd_reads));
     s_wd_last = s_stats;
 }
 
@@ -420,4 +459,49 @@ void n64_pager_start_watchdog(void)
     started = 1;
     timer_init();
     new_timer(TIMER_TICKS(15 * 1000000), TF_CONTINUOUS, watchdog_cb);
+}
+
+// ---------------------------------------------------------------------------
+// SD swap file. Created on first use (the size of the heap's SD part), then
+// mapped once: the sector of every 4 KiB unit is recorded, so the pager does
+// raw sector I/O from its exception handler without going through FatFs (and
+// the file need not be contiguous).
+// ---------------------------------------------------------------------------
+#include <fatfs/ff.h>
+int n64_pager_attach_sd_swap(const char* path)
+{
+    static FIL fil;
+    if (s_sd_lba || s_nheap <= s_nsdram) return s_sd_lba != NULL;
+    const uint32_t pages = s_nheap - s_nsdram;
+    const FSIZE_t bytes = (FSIZE_t)pages * PG_SIZE;
+    if (f_open(&fil, path, FA_READ | FA_WRITE | FA_OPEN_ALWAYS) != FR_OK) return 0;
+    if (f_size(&fil) < bytes) {
+        // Extending by seeking allocates the clusters without writing data.
+        if (f_lseek(&fil, bytes) != FR_OK || f_tell(&fil) != bytes || f_sync(&fil) != FR_OK) {
+            debugf("[pager] cannot allocate a %lu MiB swap file on the SD card\n", (unsigned long)(bytes >> 20));
+            f_close(&fil);
+            return 0;
+        }
+    }
+    FATFS* fs = fil.obj.fs;
+    if ((fs->csize * 512u) % SD_UNIT != 0) {
+        debugf("[pager] SD swap needs a cluster size that is a multiple of 4 KiB\n");
+        f_close(&fil);
+        return 0;
+    }
+    const uint32_t units = pages * (PG_SIZE / SD_UNIT);
+    uint32_t* map = malloc(units * sizeof(uint32_t));
+    if (!map) { f_close(&fil); return 0; }
+    for (uint32_t u = 0; u < units; ++u) {
+        const FSIZE_t off = (FSIZE_t)u * SD_UNIT;
+        if (f_lseek(&fil, off) != FR_OK || fil.clust < 2) { free(map); f_close(&fil); return 0; }
+        map[u] = (uint32_t)(fs->database + (LBA_t)(fil.clust - 2) * fs->csize + (off / 512) % fs->csize);
+    }
+    // The file stays open (never written through FatFs) so it cannot be removed.
+    s_sd_pages = pages;
+    s_sd_lba = map;
+    debugf("[pager] SD swap attached: %lu MiB at %s (heap: %lu MiB SDRAM + %lu MiB SD)\n",
+           (unsigned long)(bytes >> 20), path, (unsigned long)(s_nsdram * PG_SIZE >> 20),
+           (unsigned long)(pages * PG_SIZE >> 20));
+    return 1;
 }

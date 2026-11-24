@@ -36,7 +36,7 @@ namespace {
 constexpr uint32_t kPage      = PG_SIZE;
 constexpr uint32_t kSmallMax  = 512;
 constexpr uint32_t kClasses   = kSmallMax / 8;      // 64
-constexpr uint32_t kMaxPages  = 4096;               // 64 MiB of heap at most
+constexpr uint32_t kMaxPages  = 7168;               // 112 MiB of heap at most
 constexpr uint8_t  kLarge     = 0xFF;
 constexpr uint8_t  kUnused    = 0;
 
