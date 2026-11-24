@@ -258,7 +258,11 @@ static int cs_find(uint32_t units, uint16_t* out) {
         uint32_t u = pass ? 1 : s_cs_rover, run = 0, start = u;
         const uint32_t end = pass ? s_cs_rover + units : s_cs_units;
         for (; u < end && u < s_cs_units; ++u) {
-            if ((u & 31) == 0 && run == 0 && s_cs_map[u >> 5] == 0xFFFFFFFFu) { u += 31; continue; }
+            if ((u & 31) == 0 && run == 0 && s_cs_map[u >> 5] == 0xFFFFFFFFu) {
+                u += 31;                           // whole word in use: skip it
+                start = u + 1;
+                continue;
+            }
             if (cs_bit(u)) { run = 0; start = u + 1; continue; }
             if (++run == units) {
                 cs_set(start, units, 1);
