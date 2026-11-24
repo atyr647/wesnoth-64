@@ -218,37 +218,54 @@ static uint32_t pick_frame(void) {
 #define LZ4_STATIC_LINKING_ONLY
 #include "lz4/lz4.h"
 #define CS_UNIT        1024u
-#define CS_CLASSES     (PG_SIZE / CS_UNIT)       // slot sizes 1..16 units
+#define CS_CLASSES     (PG_SIZE / CS_UNIT)       // a page takes 1..16 units
 #define CS_RAW         0xFFFFu                   // clen: stored uncompressed
-#define CS_FREE_MAX    1024u                     // free slots remembered per size
+#define CS_MAX_UNITS   65536u
 extern int decompress_lz4_full_fast(const void* inbuf, int insize, void* outbuf);   // libdragon
 static LZ4_stream_t s_lz4_state;
 static uint8_t s_cbuf[LZ4_COMPRESSBOUND(PG_SIZE) + 16] __attribute__((aligned(16)));
 static uint8_t s_dbuf[PG_SIZE + 16] __attribute__((aligned(16)));   // decoder may write 8 bytes past the end
-static uint16_t s_slot[MAX_PAGES];             // unit index of the page's slot (0 = none)
+static uint16_t s_slot[MAX_PAGES];             // first unit of the page's slot (0 = none)
+static uint8_t  s_sunits[MAX_PAGES];           // units the slot spans
 static uint16_t s_clen[MAX_PAGES];             // compressed bytes (CS_RAW: uncompressed)
-static uint16_t s_cfree[CS_CLASSES][CS_FREE_MAX];
-static uint16_t s_cfree_n[CS_CLASSES];
-static uint32_t s_cs_top = 1, s_cs_units;      // next unit to carve; units in the area
+static uint32_t s_cs_map[CS_MAX_UNITS / 32];   // allocation bitmap, 1 = used
+static uint32_t s_cs_units, s_cs_used, s_cs_rover = 1;
 static uint64_t s_cz_in, s_cz_out, s_cz_ticks;
 static uint32_t s_cz_zero;
 
-static inline uint32_t cs_units(uint32_t page) {
+static inline int  cs_bit(uint32_t u) { return (s_cs_map[u >> 5] >> (u & 31)) & 1; }
+static inline void cs_set(uint32_t u, uint32_t n, int v) {
+    for (uint32_t i = u; i < u + n; ++i) {
+        if (v) s_cs_map[i >> 5] |= 1u << (i & 31); else s_cs_map[i >> 5] &= ~(1u << (i & 31));
+    }
+    if (v) s_cs_used += n; else s_cs_used -= n;
+}
+static inline uint32_t cs_units_for(uint32_t page) {
     return s_clen[page] == CS_RAW ? CS_CLASSES : (s_clen[page] + CS_UNIT - 1) / CS_UNIT;
 }
 static void cs_release(uint32_t page) {
     if (!s_slot[page]) return;
-    const uint32_t c = cs_units(page) - 1;
-    if (s_cfree_n[c] < CS_FREE_MAX) s_cfree[c][s_cfree_n[c]++] = s_slot[page];
+    cs_set(s_slot[page], s_sunits[page], 0);
     s_slot[page] = 0;
+    s_sunits[page] = 0;
 }
+// Next-fit search for a run of free units (unit 0 is never used).
 static uint16_t cs_alloc(uint32_t units) {
-    if (s_cfree_n[units - 1]) return s_cfree[units - 1][--s_cfree_n[units - 1]];
-    if (s_cs_top + units <= s_cs_units) { uint16_t u = (uint16_t)s_cs_top; s_cs_top += units; return u; }
-    for (uint32_t c = units; c < CS_CLASSES; ++c)          // a bigger free slot (rest wasted)
-        if (s_cfree_n[c]) return s_cfree[c][--s_cfree_n[c]];
+    for (int pass = 0; pass < 2; ++pass) {
+        uint32_t u = pass ? 1 : s_cs_rover, run = 0, start = u;
+        const uint32_t end = pass ? s_cs_rover + units : s_cs_units;
+        for (; u < end && u < s_cs_units; ++u) {
+            if ((u & 31) == 0 && run == 0 && s_cs_map[u >> 5] == 0xFFFFFFFFu) { u += 31; continue; }
+            if (cs_bit(u)) { run = 0; start = u + 1; continue; }
+            if (++run == units) {
+                cs_set(start, units, 1);
+                s_cs_rover = start + units;
+                return (uint16_t)start;
+            }
+        }
+    }
     assertf(0, "out of swap: the heap does not fit in the cartridge SDRAM even compressed "
-               "(%lu KiB stored for %lu KiB of pages)", (unsigned long)(s_cz_out >> 10), (unsigned long)(s_cz_in >> 10));
+               "(%lu of %lu KiB in use)", (unsigned long)s_cs_used, (unsigned long)s_cs_units);  /* 1 KiB units */
     return 0;
 }
 static inline uint32_t cs_addr(uint16_t unit) { return s_swap_base + (uint32_t)unit * CS_UNIT; }
@@ -256,19 +273,25 @@ static inline uint32_t cs_addr(uint16_t unit) { return s_swap_base + (uint32_t)u
 // Write a heap page (frame contents) to compressed swap.
 static void cs_store(uint32_t page, const uint8_t* src) {
     const uint64_t t0 = get_ticks();
-    cs_release(page);
     const uint64_t* w = (const uint64_t*)src;
     uint32_t i = 0;
     while (i < PG_SIZE / 8 && w[i] == 0) ++i;
     s_cz_in += PG_SIZE;
-    if (i == PG_SIZE / 8) { s_clen[page] = 0; ++s_cz_zero; return; }   // zero page: nothing stored
+    if (i == PG_SIZE / 8) { cs_release(page); s_clen[page] = 0; ++s_cz_zero; return; }   // zero page
     int n = LZ4_compress_fast_extState(&s_lz4_state, (const char*)src, (char*)s_cbuf, PG_SIZE,
                                        (int)sizeof s_cbuf - 16, 1);
     const uint8_t* data = s_cbuf;
     if (n <= 0 || n > (int)(PG_SIZE - CS_UNIT)) { n = PG_SIZE; s_clen[page] = CS_RAW; data = src; }
     else s_clen[page] = (uint16_t)n;
-    const uint32_t units = cs_units(page);
-    s_slot[page] = cs_alloc(units);
+    const uint32_t units = cs_units_for(page);
+    if (s_slot[page] && units <= s_sunits[page]) {
+        // fits in the old slot: keep it, give back the tail
+        cs_set(s_slot[page] + units, s_sunits[page] - units, 0);
+    } else {
+        cs_release(page);
+        s_slot[page] = cs_alloc(units);
+    }
+    s_sunits[page] = (uint8_t)units;
     if (data == s_cbuf) data_cache_hit_writeback(s_cbuf, (n + 15) & ~15);
     dma_write(data, cs_addr(s_slot[page]), (n + 1) & ~1);
     s_cz_out += (uint64_t)units * CS_UNIT;
@@ -448,7 +471,7 @@ static void pager_init(void) {
         if (swap_end - s_swap_base > N64_SWAP_AREA_LIMIT_MB * 1048576u) swap_end = s_swap_base + N64_SWAP_AREA_LIMIT_MB * 1048576u;
 #endif
         s_cs_units = (swap_end - s_swap_base) / CS_UNIT;
-        if (s_cs_units > 0xFFFFu) s_cs_units = 0xFFFFu;
+        if (s_cs_units > CS_MAX_UNITS) s_cs_units = CS_MAX_UNITS;
         s_nsdram = ((uint32_t)((uint64_t)(swap_end - s_swap_base) * 5 / 2 / PG_SIZE)) & ~1u;
         if (s_ncode + s_nsdram > MAX_PAGES) s_nsdram = (MAX_PAGES - s_ncode) & ~1u;
 #ifdef N64_SDRAM_SWAP_LIMIT_MB   /* testing: force most of the heap onto the SD swap file */
@@ -556,7 +579,7 @@ static void watchdog_cb(int ovfl)
     if (s_cz_in)
         debugf("[watchdog] compressed swap (virtual heap %lu MiB): %lu KiB of %lu KiB used; written %lu KiB as %lu KiB (%lu%%), %lu us per page\n",
                (unsigned long)((s_nsdram * PG_SIZE) >> 20),
-               (unsigned long)((s_cs_top * CS_UNIT) >> 10), (unsigned long)((s_cs_units * CS_UNIT) >> 10),
+               (unsigned long)((s_cs_used * CS_UNIT) >> 10), (unsigned long)((s_cs_units * CS_UNIT) >> 10),
                (unsigned long)(s_cz_in >> 10), (unsigned long)(s_cz_out >> 10),
                (unsigned long)(s_cz_out * 100 / s_cz_in),
                (unsigned long)(TICKS_TO_US(s_cz_ticks) / (s_cz_in / PG_SIZE - s_cz_zero + 1)));
