@@ -330,3 +330,10 @@ void operator delete(void* p, std::align_val_t) noexcept { n64_vfree(p); }
 void operator delete[](void* p, std::align_val_t) noexcept { n64_vfree(p); }
 void operator delete(void* p, size_t, std::align_val_t) noexcept { n64_vfree(p); }
 void operator delete[](void* p, size_t, std::align_val_t) noexcept { n64_vfree(p); }
+
+// Diagnostics: log the bytes in live allocations, with a label.
+extern "C" void n64_vheap_mark(const char* what, int stage) {
+    std::fprintf(stderr, "[vheap] mark %s %d: %u KiB live, %u MiB reserved, at %u s\n", what, stage,
+                 (unsigned)(s_live >> 10), (unsigned)(s_top * kPage >> 20), (unsigned)(get_ticks_ms() / 1000));
+}
+extern "C" unsigned n64_vheap_live_kib(void) { return (unsigned)(s_live >> 10); }

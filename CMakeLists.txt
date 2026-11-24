@@ -810,6 +810,15 @@ if(N64_BUILD)
     # would not carry the file names cmake/n64_paged.ld selects on.
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         src/n64/pager/n64_eh_sext.S)
+    # Measurement build: -DN64_SWAP_STATS=ON logs how well evicted heap pages
+    # would compress (src/n64/pager/lz4 is only linked then).
+    option(N64_SWAP_STATS "Log heap page compressibility (diagnostics)" OFF)
+    if(N64_SWAP_STATS)
+        target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
+        set_source_files_properties(src/n64/pager/n64_pager.c src/n64/pager/lz4/lz4.c PROPERTIES
+            COMPILE_DEFINITIONS "N64_SWAP_STATS=1")
+        set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2")
+    endif()
     set_source_files_properties(src/n64/pager/n64_pager.c src/n64/n64_libgcc.c
         src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         PROPERTIES COMPILE_OPTIONS "-fno-lto")

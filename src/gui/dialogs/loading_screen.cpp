@@ -114,8 +114,16 @@ void loading_screen::post_show()
 	cursor_setter_.reset();
 }
 
+#ifdef N64_BUILD
+extern "C" void n64_vheap_mark(const char* what, int stage);
+#endif
+
 void loading_screen::progress(loading_stage stage)
 {
+#ifdef N64_BUILD
+	// Diagnostics: live heap at each loading stage (console memory budget).
+	n64_vheap_mark("loading stage", static_cast<int>(stage));
+#endif
 	if(singleton_ && stage != loading_stage::none) {
 		singleton_->current_stage_.store(stage, std::memory_order_release);
 		// Allow display to update, close events to be handled, etc.

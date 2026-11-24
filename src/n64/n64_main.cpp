@@ -45,6 +45,7 @@ extern "C" void* n64_vmalloc(size_t);
 extern "C" void* n64_vrealloc(void*, size_t);
 extern "C" void  n64_vfree(void*);
 extern "C" void* n64_vcalloc(size_t, size_t);
+extern "C" void n64_vheap_mark(const char* what, int stage);
 #  endif
 
 // C++ exception self-test: a throw through a frame with a destructor (cleanup
@@ -173,6 +174,7 @@ int main() {
     static std::vector<char*> argv;
     for (auto& a : args) argv.push_back(a.data());
     argv.push_back(nullptr);
+    n64_vheap_mark("before wesnoth_main", 0);
     N64_LOG("Entering Wesnoth main()");
     const int rc = wesnoth_main((int)args.size(), argv.data());
 

@@ -210,6 +210,27 @@ static uint32_t pick_frame(void) {
     }
 }
 
+#ifdef N64_SWAP_STATS
+// Measurement: how well would heap pages compress (compressed swap)?
+#define LZ4_STATIC_LINKING_ONLY
+#include "lz4/lz4.h"
+static LZ4_stream_t s_lz4_state;
+static char s_lz4_out[LZ4_COMPRESSBOUND(PG_SIZE)];
+static uint64_t s_cz_in, s_cz_out, s_cz_ticks;
+static uint32_t s_cz_zero;
+static void swap_stats(const uint8_t* page) {
+    const uint64_t t0 = get_ticks();
+    const uint64_t* w = (const uint64_t*)page;
+    uint32_t i = 0;
+    while (i < PG_SIZE / 8 && w[i] == 0) ++i;
+    if (i == PG_SIZE / 8) { ++s_cz_zero; s_cz_in += PG_SIZE; return; }
+    int n = LZ4_compress_fast_extState(&s_lz4_state, (const char*)page, s_lz4_out, PG_SIZE, sizeof s_lz4_out, 1);
+    s_cz_in += PG_SIZE;
+    s_cz_out += n > 0 ? (uint64_t)n : PG_SIZE;
+    s_cz_ticks += get_ticks() - t0;
+}
+#endif
+
 static void evict(uint32_t fi) {
     frame_t* f = &s_frames[fi];
     if (f->page < 0) return;
@@ -219,6 +240,9 @@ static void evict(uint32_t fi) {
     if (is_heap(old) && (s_flags[old] & F_DIRTY)) {
         uint8_t* src = s_pool + fi * PG_SIZE;
         data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM / SD
+#ifdef N64_SWAP_STATS
+        swap_stats(src);
+#endif
         if (on_sd(old)) { sd_page_io(old, src, 1); ++s_stats.sd_writes; }
         else dma_write(src, swap_addr(old), PG_SIZE);
         s_flags[old] = (uint8_t)((s_flags[old] & ~F_DIRTY) | F_SWAPPED);
@@ -439,13 +463,14 @@ int main(void) {
 // ---------------------------------------------------------------------------
 #include <timer.h>
 static n64_pager_stats_t s_wd_last;
+extern unsigned n64_vheap_live_kib(void);
 static void watchdog_cb(int ovfl)
 {
     (void)ovfl;
     uint32_t epc;
     asm volatile("mfc0 %0,$14" : "=r"(epc));
-    debugf("[watchdog] pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu  sd w+%lu r+%lu\n",
-           (unsigned long)epc,
+    debugf("[watchdog] heap %u KiB  pc %08lx  faults +%lu  refills +%lu  evictions +%lu  writebacks +%lu  swapins +%lu  sd w+%lu r+%lu\n",
+           n64_vheap_live_kib(), (unsigned long)epc,
            (unsigned long)(s_stats.faults - s_wd_last.faults),
            (unsigned long)(s_stats.refills - s_wd_last.refills),
            (unsigned long)(s_stats.evictions - s_wd_last.evictions),
@@ -454,6 +479,13 @@ static void watchdog_cb(int ovfl)
            (unsigned long)(s_stats.sd_writes - s_wd_last.sd_writes),
            (unsigned long)(s_stats.sd_reads - s_wd_last.sd_reads));
     s_wd_last = s_stats;
+#ifdef N64_SWAP_STATS
+    if (s_cz_in)
+        debugf("[watchdog] heap pages written back: %lu KiB, %lu all-zero; LZ4 would store %lu KiB (%lu%%), %lu us per page\n",
+               (unsigned long)(s_cz_in >> 10), (unsigned long)s_cz_zero, (unsigned long)(s_cz_out >> 10),
+               (unsigned long)(s_cz_out * 100 / s_cz_in),
+               (unsigned long)(TICKS_TO_US(s_cz_ticks) / (s_cz_in / PG_SIZE - s_cz_zero + 1)));
+#endif
 }
 
 void n64_pager_start_watchdog(void)
