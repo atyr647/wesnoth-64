@@ -49,16 +49,26 @@ static void fill(SDL_AudioDevice *this, Uint8 *out, int bytes)
     if (SDL_AudioStreamGet(this->stream, out, bytes) != bytes) SDL_memset(out, this->spec.silence, bytes);
 }
 
-/* Called from the video driver's event pump and from SDL_Delay. */
+/* Called from the video driver's event pump and from SDL_Delay. At most one
+   hardware buffer is filled per call, and no more than about a third of the
+   time since the previous call is spent here: when decoding is slower than
+   real time (Ogg Vorbis music on a 93 MHz CPU) the sound breaks up, but the
+   program itself always keeps running. */
 void SDL_N64_AudioPump(void)
 {
+    static uint64_t last_end, last_cost;
     SDL_AudioDevice *this = s_device;
-    if (!this) return;
-    while (audio_can_write()) {
+    uint64_t now;
+    if (!this || !audio_can_write()) return;
+    now = get_ticks();
+    if (last_end && now - last_end < last_cost * 2) return;
+    {
         short *buf = audio_write_begin();
         fill(this, (Uint8 *)buf, (int)this->spec.size);
         audio_write_end();
     }
+    last_end = get_ticks();
+    last_cost = last_end - now;
 }
 
 static int N64AUDIO_OpenDevice(SDL_AudioDevice *this, const char *devname)
