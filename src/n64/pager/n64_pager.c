@@ -249,8 +249,11 @@ static void cs_release(uint32_t page) {
     s_slot[page] = 0;
     s_sunits[page] = 0;
 }
+static void cs_compact(void);
+static uint32_t s_cs_compactions;
+
 // Next-fit search for a run of free units (unit 0 is never used).
-static uint16_t cs_alloc(uint32_t units) {
+static int cs_find(uint32_t units, uint16_t* out) {
     for (int pass = 0; pass < 2; ++pass) {
         uint32_t u = pass ? 1 : s_cs_rover, run = 0, start = u;
         const uint32_t end = pass ? s_cs_rover + units : s_cs_units;
@@ -260,15 +263,63 @@ static uint16_t cs_alloc(uint32_t units) {
             if (++run == units) {
                 cs_set(start, units, 1);
                 s_cs_rover = start + units;
-                return (uint16_t)start;
+                *out = (uint16_t)start;
+                return 1;
             }
         }
     }
+    return 0;
+}
+
+// When the free space is enough but too fragmented, compact and retry.
+static uint16_t cs_alloc(uint32_t units) {
+    uint16_t u;
+    if (cs_find(units, &u)) return u;
+    if (s_cs_used + units + 1 <= s_cs_units) {
+        cs_compact();
+        s_cs_rover = 1;
+        if (cs_find(units, &u)) return u;
+    }
     assertf(0, "out of swap: the heap does not fit in the cartridge SDRAM even compressed "
-               "(%lu of %lu KiB in use)", (unsigned long)s_cs_used, (unsigned long)s_cs_units);  /* 1 KiB units */
+               "(%lu of %lu KiB in use)", (unsigned long)s_cs_used, (unsigned long)s_cs_units);
     return 0;
 }
 static inline uint32_t cs_addr(uint16_t unit) { return s_swap_base + (uint32_t)unit * CS_UNIT; }
+
+// Slide every stored page down to close the gaps (SDRAM -> RAM -> SDRAM).
+static void cs_compact(void) {
+    static uint16_t order[MAX_PAGES];
+    uint32_t n = 0;
+    for (uint32_t p = s_ncode; p < s_ncode + s_nheap; ++p)
+        if (s_slot[p]) order[n++] = (uint16_t)p;
+    // sort by slot position (insertion sort on a nearly sorted list is fine; n is a few thousand)
+    for (uint32_t i = 1; i < n; ++i) {
+        uint16_t v = order[i];
+        uint32_t j = i;
+        while (j > 0 && s_slot[order[j - 1]] > s_slot[v]) { order[j] = order[j - 1]; --j; }
+        order[j] = v;
+    }
+    uint32_t next = 1;
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t p = order[i], len = s_sunits[p];
+        if (s_slot[p] != next) {
+            const uint32_t bytes = len * CS_UNIT;
+            data_cache_hit_writeback_invalidate(s_dbuf, bytes);
+            dma_read(s_dbuf, cs_addr(s_slot[p]), bytes);
+            dma_write(s_dbuf, cs_addr((uint16_t)next), bytes);
+            s_slot[p] = (uint16_t)next;
+        }
+        next += len;
+    }
+    memset(s_cs_map, 0, sizeof s_cs_map);
+    s_cs_used = 0;
+    cs_set(0, next, 1);                              // unit 0 (reserved) and the packed slots
+    s_cs_used -= 1;
+    ++s_cs_compactions;
+    debugf("[pager] compressed swap compacted: %lu KiB in %lu pages\n",
+           (unsigned long)((next - 1) * CS_UNIT >> 10), (unsigned long)n);
+}
+
 
 // Write a heap page (frame contents) to compressed swap.
 static void cs_store(uint32_t page, const uint8_t* src) {
