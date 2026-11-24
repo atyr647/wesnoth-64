@@ -36,8 +36,9 @@
 #  include "serialization/schema_validator.hpp"
 
 // Frame pool for the demand pager (src/n64/pager): 16 KiB frames shared by
-// paged code and the swappable heap. 240 frames = 3.75 MiB of RAM.
-extern "C" uint32_t n64_pager_frames_requested = 240;
+// paged code and the swappable heap. 208 frames = 3.25 MiB of RAM; the rest
+// of physical memory goes to the RDP renderer's texture cache.
+extern "C" uint32_t n64_pager_frames_requested = 208;
 
 #  ifdef N64_PAGED
 extern "C" void* n64_vmalloc(size_t);

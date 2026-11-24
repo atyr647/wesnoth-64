@@ -17,8 +17,8 @@
  * copied back when evicted).
  *
  * The RDP does not compute destination alpha (a 32-bit framebuffer's fourth
- * byte receives coverage bits). Render targets that are later composited
- * with blending (Wesnoth's GUI window buffers) keep a companion RGBA16
+ * byte receives coverage bits). Render targets that are cleared to a
+ * non-opaque colour (Wesnoth's GUI window buffers) keep a companion RGBA16
  * "alpha" surface: every draw is repeated into it with the blender computing
  * a_out = a_src + a_dst * (1 - a_src) -- SDL_BLENDMODE_BLEND's alpha rule --
  * and the result is merged into the texture's alpha bytes before it is drawn.
@@ -293,7 +293,7 @@ static int N64R_CreateTexture(SDL_Renderer *renderer, SDL_Texture *texture)
     t->sh = (int)ceilf(t->h * t->fy);
     if (t->sw < 1) t->sw = 1;
     if (t->sh < 1) t->sh = 1;
-    t->track_alpha = t->target && texture->blendMode != SDL_BLENDMODE_NONE;
+    t->track_alpha = SDL_FALSE;      /* enabled by the first transparent clear */
     if (!t->target) {
         t->cpu = (Uint8 *)SDL_calloc((size_t)t->sw * t->sh, 4);
         if (!t->cpu) { SDL_free(t); return SDL_OutOfMemory(); }
@@ -591,6 +591,20 @@ static void fill_rects(N64_RenderData *d, const SDL_FRect *r, int n, SDL_Color c
 
 static void clear(N64_RenderData *d, SDL_Color c)
 {
+    /* A target cleared to a non-opaque colour is one whose alpha matters when
+       it is composited later (GUI window buffers): start tracking it. The
+       main screen buffer is only ever cleared opaque and needs none. */
+    if (d->target && !d->target->track_alpha && c.a < 255) {
+        N64_Texture *t = d->target;
+        const size_t extra = (size_t)t->sw * t->sh * 2;
+        detach(d);
+        make_room(d, extra, t);
+        t->alpha = surface_alloc(FMT_RGBA16, t->sw, t->sh);
+        if (t->alpha.buffer) {
+            d->used += extra;
+            t->track_alpha = SDL_TRUE;
+        }
+    }
     attach_target(d, d->target);
     rdpq_set_scissor(0, 0, d->target ? d->target->sw : N64R_OUT_W, d->target ? d->target->sh : N64R_PHYS_H);
     rdpq_set_mode_fill(RGBA32(c.r, c.g, c.b, c.a));
@@ -695,17 +709,6 @@ static int N64R_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd, 
     (void)vertsize;
     ++s_diag.queues;
 
-    /* A target that will be composited with blending needs its alpha tracked
-       (the blend mode is usually set after the texture is created). */
-    if (want && !want->track_alpha && renderer->target->blendMode != SDL_BLENDMODE_NONE) {
-        if (want->gpu.buffer) {
-            int y;
-            want->alpha = surface_alloc(FMT_RGBA16, want->sw, want->sh);
-            for (y = 0; y < want->sh; ++y) SDL_memset((Uint8 *)want->alpha.buffer + y * want->alpha.stride, 0, want->sw * 2);
-            d->used += (size_t)want->sw * want->sh * 2;
-        }
-        want->track_alpha = SDL_TRUE;
-    }
     if (want != d->target || !d->attached) {
         detach(d);
         d->target = want;

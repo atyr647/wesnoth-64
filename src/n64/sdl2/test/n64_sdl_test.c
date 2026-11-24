@@ -52,6 +52,11 @@ int main(void)
     SDL_Texture* tunit = unit ? SDL_CreateTextureFromSurface(ren, unit) : NULL;
     SDL_Texture* ttile = tile ? SDL_CreateTextureFromSurface(ren, tile) : NULL;
     SDL_Texture* target = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, 640, 480);
+    /* A window-style buffer: transparent target with blended content,
+       composited over the scene (what Wesnoth's GUI windows do). */
+    SDL_Texture* winbuf = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, 240, 160);
+    SDL_SetTextureBlendMode(winbuf, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
     SDL_AddTimer(500, tick, NULL);
 
     int frames = 0, ticks = 0, clicks = 0, keys = 0;
@@ -87,6 +92,18 @@ int main(void)
             SDL_RenderCopyEx(ren, tunit, NULL, &ghost, 0.0, NULL, SDL_FLIP_HORIZONTAL);
             SDL_SetTextureAlphaMod(tunit, 255);
         }
+        /* window buffer: clear transparent, opaque box, half-transparent box, sprite */
+        SDL_SetRenderTarget(ren, winbuf);
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 0);
+        SDL_RenderClear(ren);
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        { SDL_Rect a = { 10, 10, 100, 60 }, b = { 80, 50, 140, 90 };
+          SDL_SetRenderDrawColor(ren, 20, 40, 120, 255); SDL_RenderFillRect(ren, &a);
+          SDL_SetRenderDrawColor(ren, 200, 160, 40, 128); SDL_RenderFillRect(ren, &b); }
+        if (tunit) { SDL_Rect d = { 150, 10, 72, 72 }; SDL_RenderCopy(ren, tunit, NULL, &d); }
+        SDL_SetRenderTarget(ren, target);
+        { SDL_Rect w = { 360, 250, 240, 160 }; SDL_RenderCopy(ren, winbuf, NULL, &w); }
         SDL_SetRenderTarget(ren, NULL);
         SDL_RenderCopy(ren, target, NULL, NULL);
         SDL_RenderPresent(ren);
@@ -98,3 +115,10 @@ int main(void)
         }
     }
 }
+
+/* The engine provides these (swappable heap); the test uses the C heap. */
+#include <stdlib.h>
+void* n64_vmalloc(size_t n) { return malloc(n); }
+void* n64_vcalloc(size_t n, size_t s) { return calloc(n, s); }
+void* n64_vrealloc(void* p, size_t n) { return realloc(p, n); }
+void n64_vfree(void* p) { free(p); }
