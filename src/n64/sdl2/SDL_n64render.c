@@ -165,6 +165,12 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
         return SDL_TRUE;
     }
     if (!make_room(d, tex_bytes(t), t)) {
+        static int logged;
+        if (logged < 20) {
+            ++logged;
+            debugf("[n64render] no room for %dx%d texture (%lu KiB; %lu of %lu KiB in use)\n", t->sw, t->sh,
+                   (unsigned long)(tex_bytes(t) >> 10), (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+        }
         SDL_SetError("n64 renderer: out of texture memory");
         return SDL_FALSE;
     }
@@ -684,6 +690,17 @@ static int N64R_RunCommandQueue(SDL_Renderer *renderer, SDL_RenderCommand *cmd, 
     N64_Texture *want = renderer->target ? (N64_Texture *)renderer->target->driverdata : NULL;
     (void)vertsize;
 
+    /* A target that will be composited with blending needs its alpha tracked
+       (the blend mode is usually set after the texture is created). */
+    if (want && !want->track_alpha && renderer->target->blendMode != SDL_BLENDMODE_NONE) {
+        if (want->gpu.buffer) {
+            int y;
+            want->alpha = surface_alloc(FMT_RGBA16, want->sw, want->sh);
+            for (y = 0; y < want->sh; ++y) SDL_memset((Uint8 *)want->alpha.buffer + y * want->alpha.stride, 0, want->sw * 2);
+            d->used += (size_t)want->sw * want->sh * 2;
+        }
+        want->track_alpha = SDL_TRUE;
+    }
     if (want != d->target || !d->attached) {
         detach(d);
         d->target = want;
@@ -846,6 +863,13 @@ static int N64R_RenderPresent(SDL_Renderer *renderer)
     d->display = NULL;
     d->target = keep;
     ++d->frame;
+    if (d->frame % 600 == 1) {
+        int n = 0;
+        N64_Texture *t;
+        for (t = d->lru_head; t; t = t->next) ++n;
+        debugf("[n64render] frame %lu: %d textures resident, %lu of %lu KiB\n", (unsigned long)d->frame, n,
+               (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+    }
     return 0;
 }
 
