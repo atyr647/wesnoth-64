@@ -763,6 +763,10 @@ static int N64R_RenderReadPixels(SDL_Renderer *renderer, const SDL_Rect *rect, U
     if (!dst) return -1;
     detach(d);
     rspq_wait();
+    /* The queue may not have run since the target changed, and the target may
+       never have been drawn into (no RDRAM copy yet). */
+    d->target = renderer->target ? (N64_Texture *)renderer->target->driverdata : NULL;
+    if (d->target && !resident(d, d->target)) { SDL_FreeFormat(dst); return -1; }
     if (d->target) merge_alpha(d->target);
     for (y = 0; y < rect->h; ++y) {
         const int py = (rect->y + y) / 2;
