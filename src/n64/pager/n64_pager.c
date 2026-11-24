@@ -360,7 +360,11 @@ static void pager_init(void) {
         if (s_nsdram > N64_SDRAM_SWAP_LIMIT_MB * 64u) s_nsdram = N64_SDRAM_SWAP_LIMIT_MB * 64u;
 #endif
         // Virtual heap = SDRAM part + SD part (usable once the swap file is attached).
+#ifdef N64_SD_SWAP
         s_nheap = s_nsdram + SD_SWAP_MAX_PAGES;
+#else
+        s_nheap = s_nsdram;                      // SD swap is opt-in (-DN64_SD_SWAP)
+#endif
         if (s_ncode + s_nheap > MAX_PAGES) s_nheap = MAX_PAGES - s_ncode;
         s_nheap &= ~1u;
     }

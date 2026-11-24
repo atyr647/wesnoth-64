@@ -114,7 +114,9 @@ int main() {
     const bool rom_ok = n64_romfs_init();
     if (n64vfs::init()) {
         N64_LOG("Game data: SD card (sd:/wesnoth), user data: sd:/wesnoth-userdata");
-#  ifdef N64_PAGED
+#  if defined(N64_PAGED) && defined(N64_SD_SWAP)
+        // Optional (off by default): let the heap spill into a swap file on
+        // the SD card when it outgrows the cartridge SDRAM.
         if (!n64_pager_attach_sd_swap("/wesnoth-userdata/swap.bin"))
             N64_LOG("No SD swap file: the heap is limited to the cartridge SDRAM");
 #  endif
