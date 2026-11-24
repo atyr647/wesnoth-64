@@ -838,6 +838,20 @@ void terrain_builder::parse_mapstring(
 void terrain_builder::add_rule(building_ruleset& rules, building_rule& rule)
 {
 	if(load_images(rule)) {
+#ifdef N64_BUILD
+		// The image strings are only needed to build the locators (done by
+		// load_images) and for the rule's hash, which is cached here first;
+		// the console drops them instead of keeping a copy in every rule.
+		rule.get_hash();
+		for(terrain_constraint& constraint : rule.constraints) {
+			for(rule_image& ri : constraint.images) {
+				for(rule_image_variant& variant : ri.variants) {
+					std::string().swap(variant.image_string);
+					std::string().swap(variant.variations);
+				}
+			}
+		}
+#endif
 		rules.insert(rule);
 	}
 }

@@ -46,6 +46,10 @@ struct point;
  * as needed when relevant configuration parameters change in a way that would
  * be expected to alter the output (e.g. Time of Day-tinted images).
  */
+#ifdef N64_BUILD
+#include "utils/interned_string.hpp"
+#endif
+
 namespace image {
 /**
  * Generic locator abstracting the location of an image.
@@ -95,8 +99,16 @@ public:
 private:
 	locator::type type_ = NONE;
 	bool is_data_uri_ = false;
+#ifdef N64_BUILD
+	// Locators are copied into every terrain rule, rotation and animation
+	// frame: on the console the two strings are pooled (utils::interned_string)
+	// instead of each locator holding its own heap copies.
+	utils::interned_string filename_{};
+	utils::interned_string modifications_{};
+#else
 	std::string filename_{};
 	std::string modifications_{};
+#endif
 	map_location loc_{};
 	int center_x_ = 0;
 	int center_y_ = 0;

@@ -69,7 +69,7 @@ std::size_t hash_value(const image::locator& val)
 	std::size_t hash = std::hash<unsigned>{}(val.type_);
 
 	if(val.type_ == image::locator::FILE || val.type_ == image::locator::SUB_FILE) {
-		boost::hash_combine(hash, val.filename_);
+		boost::hash_combine(hash, static_cast<const std::string&>(val.filename_));
 	}
 
 	if(val.type_ == image::locator::SUB_FILE) {
@@ -77,7 +77,7 @@ std::size_t hash_value(const image::locator& val)
 		boost::hash_combine(hash, val.loc_.y);
 		boost::hash_combine(hash, val.center_x_);
 		boost::hash_combine(hash, val.center_y_);
-		boost::hash_combine(hash, val.modifications_);
+		boost::hash_combine(hash, static_cast<const std::string&>(val.modifications_));
 	}
 
 	return hash;
@@ -229,7 +229,7 @@ locator locator::clone(const std::string& mods) const
 {
 	locator res = *this;
 	if(!mods.empty()) {
-		res.modifications_ += mods;
+		res.modifications_ = static_cast<const std::string&>(res.modifications_) + mods;
 		res.type_ = SUB_FILE;
 	}
 
@@ -251,13 +251,14 @@ std::ostream& operator<<(std::ostream& s, const locator& l)
 locator::locator(const std::string& fn)
 	: filename_(fn)
 {
-	if(filename_.empty()) {
+	const std::string& filename = filename_;
+	if(filename.empty()) {
 		return;
 	}
 
-	if(boost::algorithm::starts_with(filename_, data_uri_prefix)) {
-		if(parsed_data_URI parsed{ filename_ }; !parsed.good) {
-			std::string_view view{ filename_ };
+	if(boost::algorithm::starts_with(filename, data_uri_prefix)) {
+		if(parsed_data_URI parsed{ filename }; !parsed.good) {
+			std::string_view view{ filename };
 			std::string_view stripped = view.substr(0, view.find(","));
 			ERR_IMG << "Invalid data URI: " << stripped;
 		}
@@ -265,10 +266,10 @@ locator::locator(const std::string& fn)
 		is_data_uri_ = true;
 	}
 
-	if(const std::size_t markup_field = filename_.find('~'); markup_field != std::string::npos) {
+	if(const std::size_t markup_field = filename.find('~'); markup_field != std::string::npos) {
 		type_ = SUB_FILE;
-		modifications_ = filename_.substr(markup_field, filename_.size() - markup_field);
-		filename_ = filename_.substr(0, markup_field);
+		modifications_ = filename.substr(markup_field, filename.size() - markup_field);
+		filename_ = filename.substr(0, markup_field);
 	} else {
 		type_ = FILE;
 	}
