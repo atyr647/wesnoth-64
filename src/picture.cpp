@@ -33,6 +33,9 @@
 
 #include <boost/algorithm/string.hpp>
 
+#include <deque>
+#include <type_traits>
+
 #if BOOST_VERSION >= 108100
 
 #include <boost/unordered/unordered_flat_map.hpp>
@@ -113,16 +116,64 @@ public:
 
 	void add_to_cache(const locator& item, T data)
 	{
+#ifdef N64_BUILD
+		if constexpr(std::is_same_v<T, surface>) {
+			add_surface_bounded(item, std::move(data));
+			return;
+		}
+#endif
 		content_.insert_or_assign(item, std::move(data));
 	}
 
 	void flush()
 	{
 		content_.clear();
+#ifdef N64_BUILD
+		order_.clear();
+		bytes_ = 0;
+#endif
 	}
 
 private:
 	cache_map<locator, T> content_;
+
+#ifdef N64_BUILD
+	/*
+	 * On the console the surface caches are bounded: every image drawn is
+	 * also held by its texture (whose pixels live in the same heap, unlike a
+	 * PC's video memory), so keeping all the surfaces as well roughly doubles
+	 * the memory of the images in use (over 20 MiB in a campaign scenario).
+	 * The oldest surfaces are dropped first; one that is needed again is
+	 * loaded or generated again, exactly as on a cache miss.
+	 */
+	static constexpr std::size_t surface_budget = 1024 * 1024;
+	std::deque<locator> order_;
+	std::size_t bytes_ = 0;
+
+	static std::size_t surface_bytes(const surface& s)
+	{
+		return s ? static_cast<std::size_t>(s->h) * static_cast<std::size_t>(s->pitch) : 0;
+	}
+
+	void add_surface_bounded(const locator& item, T data)
+	{
+		if(auto iter = content_.find(item); iter != content_.end()) {
+			bytes_ -= std::min(bytes_, surface_bytes(iter->second));
+		} else {
+			order_.push_back(item);
+		}
+		bytes_ += surface_bytes(data);
+		content_.insert_or_assign(item, std::move(data));
+		while(bytes_ > surface_budget && order_.size() > 1) {
+			const locator oldest = order_.front();
+			order_.pop_front();
+			if(auto iter = content_.find(oldest); iter != content_.end()) {
+				bytes_ -= std::min(bytes_, surface_bytes(iter->second));
+				content_.erase(iter);
+			}
+		}
+	}
+#endif
 };
 
 namespace
