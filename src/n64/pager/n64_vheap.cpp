@@ -476,6 +476,7 @@ void operator delete[](void* p, std::align_val_t) noexcept { n64_vfree(p); }
 void operator delete(void* p, size_t, std::align_val_t) noexcept { n64_vfree(p); }
 void operator delete[](void* p, size_t, std::align_val_t) noexcept { n64_vfree(p); }
 
+extern "C" void n64_render_try_lend(void) __attribute__((weak));
 // Diagnostics: log the bytes in live allocations, with a label.
 extern "C" void n64_vheap_mark(const char* what, int stage) {
     static int last = -1;
@@ -484,6 +485,7 @@ extern "C" void n64_vheap_mark(const char* what, int stage) {
 #ifdef N64_HEAP_PROFILE
     if (stage != last) n64_vheap_profile_dump(what);
 #endif
+    if (stage != last && n64_render_try_lend) n64_render_try_lend();
     if (stage != last && stage != 23) {                // 23: loading_stage::none (progress ticks)
         char why[48];
         std::snprintf(why, sizeof why, "before loading stage %d", stage);

@@ -63,6 +63,11 @@ uint32_t n64_pager_heap_size(void);
 // they are dropped without write-back and read as zero when next touched.
 void n64_pager_discard(uint32_t va, uint32_t len);
 
+// Lend the pager 1.5 MiB more frames from the physical heap (returns bytes
+// taken, 0 if not possible) / take them back.
+uint32_t n64_pager_lend_frames(void);
+void n64_pager_reclaim_frames(void);
+
 #ifdef __cplusplus
 }
 #endif

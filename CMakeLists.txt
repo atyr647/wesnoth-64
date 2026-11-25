@@ -812,7 +812,7 @@ if(N64_BUILD)
         src/n64/pager/n64_eh_sext.S)
     # LZ4 compressor for the pager's compressed swap (resident, see n64_paged.ld).
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
-    set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2")
+    set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2" COMPILE_DEFINITIONS "LZ4_MEMORY_USAGE=12")
     # Diagnostics: -DN64_HEAP_PROFILE=ON logs the call sites holding the most heap.
     option(N64_HEAP_PROFILE "Heap profile by call site (diagnostics)" OFF)
     if(N64_HEAP_PROFILE)

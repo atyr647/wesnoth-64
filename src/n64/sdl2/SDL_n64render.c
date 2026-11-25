@@ -81,6 +81,12 @@ typedef struct
 } N64_RenderData;
 
 /* diagnostics: work done since the last log line */
+/* Idle texture memory is lent to the demand pager (src/n64/pager) and taken
+   back when textures need it. */
+extern uint32_t n64_pager_lend_frames(void) __attribute__((weak));
+extern void n64_pager_reclaim_frames(void) __attribute__((weak));
+static size_t s_lent;
+static void *s_render_data;
 /* CPU profile hook (src/n64/pager): dumped after each big frame (the map). */
 extern void n64_pager_profile_dump(const char* why) __attribute__((weak));
 static unsigned s_frame_copies;
@@ -145,6 +151,10 @@ static void evict(N64_RenderData *d, N64_Texture *t)
 
 static SDL_bool make_room(N64_RenderData *d, size_t need, N64_Texture *keep)
 {
+    if (s_lent && d->used + need + s_lent > d->budget) {
+        n64_pager_reclaim_frames();
+        s_lent = 0;
+    }
     N64_Texture *t = d->lru_tail;
     while (d->used + need > d->budget && t) {
         N64_Texture *prev = t->prev;
@@ -191,6 +201,7 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
             if (!t->alpha.buffer) { surface_free(&t->gpu); t->gpu.buffer = NULL; }
         }
         if (t->gpu.buffer) break;
+        if (s_lent) { n64_pager_reclaim_frames(); s_lent = 0; continue; }
         for (victim = d->lru_tail; victim && (victim == t || victim == d->target); victim = victim->prev) {}
         if (!victim) {
             static int logged;
@@ -884,6 +895,15 @@ static void draw_cursor(N64_RenderData *d)
     rdpq_tex_blit(&d->cursor_tex, (float)(mx - hx), (float)(my - hy) * 0.5f, &p);
 }
 
+/* Called at loading-stage changes (src/n64/pager/n64_vheap.cpp). */
+void n64_render_try_lend(void)
+{
+    N64_RenderData *d = (N64_RenderData *)s_render_data;
+    if (!d || s_lent || !n64_pager_lend_frames) return;
+    if (d->used + (1536u << 10) + (128u << 10) > d->budget) return;
+    s_lent = n64_pager_lend_frames();
+}
+
 static int N64R_RenderPresent(SDL_Renderer *renderer)
 {
     N64_RenderData *d = (N64_RenderData *)renderer->driverdata;
@@ -965,6 +985,7 @@ static SDL_Renderer *N64R_CreateRenderer(SDL_Window *window, Uint32 flags)
         const char* cap = SDL_GetHint("N64_TEXTURE_BUDGET_KB");   /* testing: a smaller budget */
         d->budget = free_bytes > (1536 << 10) ? (size_t)(free_bytes - (512 << 10)) : (1024 << 10);
         if (cap && SDL_atoi(cap) > 0 && (size_t)SDL_atoi(cap) << 10 < d->budget) d->budget = (size_t)SDL_atoi(cap) << 10;
+        s_render_data = d;
         SDL_Log("n64 renderer: %ld KiB physical RAM free, %lu KiB for textures",
                 free_bytes >> 10, (unsigned long)(d->budget >> 10));
     }

@@ -78,6 +78,14 @@ static uint8_t  s_flags[MAX_PAGES];
 typedef struct { int32_t page; uint8_t ref; } frame_t;
 static frame_t*  s_frames;
 static uint8_t*  s_pool;                     // kseg0 address of frame 0
+// Extra frames lent by the renderer while its texture memory is idle (loading
+// screens): frames [s_base_frames, s_base_frames + EXTRA_FRAMES) live in s_extra.
+#define EXTRA_FRAMES 96u                     // 1.5 MiB
+static uint8_t*  s_extra;
+static uint32_t  s_base_frames;
+static inline uint8_t* frame_addr(uint32_t fi) {
+    return fi < s_base_frames ? s_pool + fi * PG_SIZE : s_extra + (fi - s_base_frames) * PG_SIZE;
+}
 static uint32_t  s_nframes, s_ncode, s_nheap, s_rom, s_hand;
 static n64_pager_stats_t s_stats;
 static exception_handler_t s_prev_handler;
@@ -143,7 +151,7 @@ static inline void tlb_wr(void)                   { asm volatile("tlbwr; nop; no
 
 static inline uint32_t entry_lo(uint32_t page) {
     if (page >= s_ncode + s_nheap || s_pte[page] == NO_FRAME) return 1u;   // invalid, global
-    uint32_t phys = PhysicalAddr(s_pool + (uint32_t)s_pte[page] * PG_SIZE);
+    uint32_t phys = PhysicalAddr(frame_addr(s_pte[page]));
     // PFN | C=3 (cacheable, non-coherent) | D (writable: dirty heap pages only) | V | G
     uint32_t d = (is_heap(page) && (s_flags[page] & F_DIRTY)) ? 4u : 0u;
     return ((phys >> 12) << 6) | (3u << 3) | d | 2u | 1u;
@@ -224,6 +232,7 @@ static uint32_t pick_frame(void) {
 // in per-size free lists and carved from the top of the swap area.
 // ---------------------------------------------------------------------------
 #define LZ4_STATIC_LINKING_ONLY
+#define LZ4_MEMORY_USAGE 12   /* 4 KiB hash table: the VR4300 data cache is 8 KiB (set for lz4.c too) */
 #include "lz4/lz4.h"
 #define CS_UNIT        1024u
 #define CS_CLASSES     (PG_SIZE / CS_UNIT)       // a page takes 1..16 units
@@ -349,7 +358,7 @@ static void cs_store(uint32_t page, const uint8_t* src) {
     s_cz_in += PG_SIZE;
     if (i == PG_SIZE / 8) { cs_release(page); s_clen[page] = 0; ++s_cz_zero; return; }   // zero page
     int n = LZ4_compress_fast_extState(&s_lz4_state, (const char*)src, (char*)s_cbuf, PG_SIZE,
-                                       (int)sizeof s_cbuf - 16, 1);
+                                       (int)sizeof s_cbuf - 16, 2);
     const uint8_t* data = s_cbuf;
     if (n <= 0 || n > (int)(PG_SIZE - CS_UNIT)) { n = PG_SIZE; s_clen[page] = CS_RAW; data = src; }
     else s_clen[page] = (uint16_t)n;
@@ -433,7 +442,7 @@ static void evict(uint32_t fi) {
     s_pte[old] = NO_FRAME;
     tlb_set_pair(old, 0);                        // drop the mapping if cached
     if (is_heap(old) && (s_flags[old] & F_DIRTY)) {
-        uint8_t* src = s_pool + fi * PG_SIZE;
+        uint8_t* src = frame_addr(fi);
         data_cache_hit_writeback(src, PG_SIZE);   // CPU writes -> RAM, then RAM -> SDRAM / SD
         if (on_sd(old)) { sd_page_io(old, src, 1); ++s_stats.sd_writes; }
         else cs_store(old, src);
@@ -449,7 +458,7 @@ static void load_page(uint32_t page) {
     uint32_t fi = pick_frame();
     evict(fi);
     frame_t* f = &s_frames[fi];
-    uint8_t* dst = s_pool + fi * PG_SIZE;
+    uint8_t* dst = frame_addr(fi);
     if (!is_heap(page)) {
         data_cache_hit_writeback_invalidate(dst, PG_SIZE);
         dma_read(dst, s_rom + page * PG_SIZE, PG_SIZE);
@@ -647,8 +656,9 @@ static void pager_init(void) {
     s_pool = memalign(PG_SIZE, s_nframes * PG_SIZE);
     assertf(s_pool, "pager: cannot allocate %lu frames", (unsigned long)s_nframes);
     s_pool = (uint8_t*)CachedAddr(s_pool);
-    s_frames = malloc(s_nframes * sizeof(frame_t));
-    for (uint32_t i = 0; i < s_nframes; ++i) { s_frames[i].page = -1; s_frames[i].ref = 0; }
+    s_base_frames = s_nframes;
+    s_frames = malloc((s_nframes + EXTRA_FRAMES) * sizeof(frame_t));
+    for (uint32_t i = 0; i < s_nframes + EXTRA_FRAMES; ++i) { s_frames[i].page = -1; s_frames[i].ref = 0; }
     for (uint32_t i = 0; i < MAX_PAGES; ++i) { s_pte[i] = NO_FRAME; s_flags[i] = 0; }
 
     s_stats.pages = s_ncode;
@@ -660,6 +670,34 @@ static void pager_init(void) {
 }
 
 uint32_t n64_pager_heap_size(void) { pager_init(); return s_nheap * PG_SIZE; }
+
+// Lend the pager EXTRA_FRAMES more frames from the physical heap (returns the
+// bytes taken, 0 if already lent or unavailable), and take them back
+// (evicting what they hold). The renderer lends its idle texture memory
+// while the game is loading.
+uint32_t n64_pager_lend_frames(void) {
+    if (!s_ready || s_extra || !s_base_frames) return 0;
+    uint8_t* p = memalign(PG_SIZE, EXTRA_FRAMES * PG_SIZE);
+    if (!p) return 0;
+    uint32_t sr = C0_STATUS();
+    C0_WRITE_STATUS(sr & ~1u);
+    s_extra = (uint8_t*)CachedAddr(p);
+    s_nframes = s_base_frames + EXTRA_FRAMES;
+    C0_WRITE_STATUS(sr);
+    return EXTRA_FRAMES * PG_SIZE;
+}
+void n64_pager_reclaim_frames(void) {
+    if (!s_extra) return;
+    uint32_t sr = C0_STATUS();
+    C0_WRITE_STATUS(sr & ~1u);
+    for (uint32_t fi = s_base_frames; fi < s_base_frames + EXTRA_FRAMES; ++fi) evict(fi);
+    s_nframes = s_base_frames;
+    if (s_hand >= s_nframes) s_hand = 0;
+    uint8_t* p = s_extra;
+    s_extra = NULL;
+    C0_WRITE_STATUS(sr);
+    free(p);
+}
 
 // The heap pages wholly inside [va, va + len) hold no live data any more:
 // drop them (no write-back, swap slot released); the next touch maps a fresh
