@@ -314,10 +314,18 @@ void saved_game::expand_scenario()
 
 		if(scenario) {
 			starting_point_type_ = starting_point::SCENARIO;
+#ifdef N64_BUILD
+			// Scenarios not being played are kept compressed on the console.
+			if(!game_config_manager::get()->unpack_scenario(carryover_["next_scenario"], starting_point_)) {
+				starting_point_ = *scenario;
+			}
+			mp_settings_.hash = starting_point_.hash();
+#else
 			starting_point_ = *scenario;
 
 			// A hash has to be generated using an unmodified scenario data.
 			mp_settings_.hash = scenario->hash();
+#endif
 
 			check_require_scenario();
 

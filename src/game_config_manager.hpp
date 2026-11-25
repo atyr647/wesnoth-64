@@ -16,6 +16,7 @@
 #pragma once
 
 #include "achievements.hpp"
+#include <map>
 #include "commandline_options.hpp"
 #include "config.hpp"
 #include "config_cache.hpp"
@@ -46,6 +47,14 @@ public:
 	};
 
 	const game_config_view& game_config() const { return game_config_view_; }
+#ifdef N64_BUILD
+	/**
+	 * The console keeps [scenario]s that are not being played compressed
+	 * (only their attributes stay in the game config). Fills @a out with the
+	 * complete scenario and returns true if @a id is one of those.
+	 */
+	bool unpack_scenario(const std::string& id, config& out) const;
+#endif
 	const preproc_map& old_defines_map() const { return old_defines_map_; }
 	std::vector<achievement_group>& get_achievements() { return achievements_.get_list(); }
 
@@ -74,6 +83,10 @@ private:
 	const commandline_options& cmdline_opts_;
 
 	config game_config_;
+#ifdef N64_BUILD
+	void pack_scenarios();
+	std::map<std::string, std::string> packed_scenarios_;
+#endif
 	game_config_view game_config_view_;
 
 	std::map<std::string, config> addon_cfgs_;

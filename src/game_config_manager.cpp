@@ -14,6 +14,8 @@
 */
 
 #include "game_config_manager.hpp"
+#include "serialization/parser.hpp"
+#include <sstream>
 
 #include "about.hpp"
 #include "addon/manager.hpp"
@@ -318,6 +320,7 @@ void game_config_manager::load_game_config(bool reload_everything, const game_cl
 			// otherwise need room for both: the main menu's and a campaign's).
 			// Everything that refers into it is set up again below.
 			game_config_.clear();
+			packed_scenarios_.clear();
 #endif
 			game_config_ = cache_.get_config(filesystem::get_wml_location(wml_tree_root).value(), validator.get());
 			game_config_.append(valid_cores);
@@ -391,6 +394,9 @@ void game_config_manager::load_game_config(bool reload_everything, const game_cl
 		}
 	}
 
+#ifdef N64_BUILD
+	pack_scenarios();
+#endif
 	old_defines_map_ = cache_.get_preproc_map();
 
 	// Set new binary paths.
@@ -790,3 +796,34 @@ void game_config_manager::set_enabled_addon_all()
 		active_addons_.emplace(pair.first);
 	}
 }
+
+#ifdef N64_BUILD
+// A campaign's scenarios are more than half of its game config, and only the
+// one being played is read (saved_game::expand_scenario copies it). The
+// others are kept as gzip WML, the same serialization the config cache uses,
+// with their attributes left in place for code that lists or looks up ids.
+void game_config_manager::pack_scenarios()
+{
+	for(config& sc : game_config_.child_range("scenario")) {
+		const std::string id = sc["id"].str();
+		if(id.empty() || sc.all_children_count() == 0 || packed_scenarios_.count(id)) {
+			continue;
+		}
+		std::ostringstream out;
+		io::write_gz(out, sc);
+		packed_scenarios_[id] = std::move(out).str();
+		sc.clear_all_children();
+	}
+}
+
+bool game_config_manager::unpack_scenario(const std::string& id, config& out) const
+{
+	const auto it = packed_scenarios_.find(id);
+	if(it == packed_scenarios_.end()) {
+		return false;
+	}
+	std::istringstream in(it->second);
+	out = io::read_gz(in);
+	return true;
+}
+#endif
