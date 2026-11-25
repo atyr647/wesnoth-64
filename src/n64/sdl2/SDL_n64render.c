@@ -177,12 +177,30 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
         SDL_SetError("n64 renderer: out of texture memory");
         return SDL_FALSE;
     }
-    t->gpu = surface_alloc(FMT_RGBA32, t->sw, t->sh);
-    if (!t->gpu.buffer) {
-        SDL_OutOfMemory();
-        return SDL_FALSE;
+    /* The budget can be met while the physical heap is too fragmented for
+       one more block of this size: evict least recently used textures until
+       the allocation succeeds (or nothing is left to evict). */
+    for (;;) {
+        N64_Texture *victim;
+        t->gpu = surface_alloc(FMT_RGBA32, t->sw, t->sh);
+        if (t->gpu.buffer && t->track_alpha) {
+            t->alpha = surface_alloc(FMT_RGBA16, t->sw, t->sh);
+            if (!t->alpha.buffer) { surface_free(&t->gpu); t->gpu.buffer = NULL; }
+        }
+        if (t->gpu.buffer) break;
+        for (victim = d->lru_tail; victim && (victim == t || victim == d->target); victim = victim->prev) {}
+        if (!victim) {
+            static int logged;
+            if (logged < 20) {
+                ++logged;
+                debugf("[n64render] cannot allocate %dx%d texture (%lu KiB; %lu of %lu KiB in use)\n", t->sw, t->sh,
+                       (unsigned long)(tex_bytes(t) >> 10), (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+            }
+            SDL_OutOfMemory();
+            return SDL_FALSE;
+        }
+        evict(d, victim);
     }
-    if (t->track_alpha) t->alpha = surface_alloc(FMT_RGBA16, t->sw, t->sh);
     d->used += tex_bytes(t);
     lru_push_front(d, t);
     if (t->cpu) {
