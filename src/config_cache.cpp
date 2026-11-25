@@ -317,15 +317,19 @@ config config_cache::load_configs(const std::string& config_path, abstract_valid
 				first = false;
 			}
 		}
-		std::uint32_t expected = 0;
-		if(const unsigned char* node = n64_frozen::find_root(key, &expected)) {
+		n64_frozen::root_info root;
+		if(n64_frozen::find_root(key, root)) {
 			PLAIN_LOG << "[frozen] using the baked config for '" << key << "'";
 			if(n64_frozen::check_roots) {
-				const std::uint32_t found = n64_frozen::check_hash(config::from_frozen(node));
-				PLAIN_LOG << "[frozen] check of '" << key << "': " << (found == expected ? "identical to" : "DIFFERS from")
-					<< " the stock loader's config (hash " << std::hex << found << ", baked " << expected << std::dec << ")";
+				const std::uint32_t found = n64_frozen::check_hash(config::from_frozen(root.node));
+				PLAIN_LOG << "[frozen] check of '" << key << "': " << (found == root.hash ? "identical to" : "DIFFERS from")
+					<< " the stock loader's config (hash " << std::hex << found << ", baked " << root.hash << std::dec << ")";
 			}
-			return config::from_frozen(node);
+			if(key.compare(0, 5, "data|") == 0) {
+				// the WML tree: its [terrain_graphics] are baked too
+				n64_frozen::set_terrain_rules(root.terrain);
+			}
+			return config::from_frozen(root.node);
 		}
 		PLAIN_LOG << "[frozen] no baked config for '" << key << "': loading from files";
 	}

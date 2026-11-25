@@ -22,6 +22,8 @@
 
 #include "utils/interned_string.hpp"
 #include "animated.hpp"
+#include <memory>
+#include <unordered_map>
 #include "map/location.hpp"
 #include "terrain/translation.hpp"
 
@@ -449,6 +451,13 @@ private:
 		unsigned int get_hash() const;
 
 	private:
+#ifdef N64_BUILD
+	public:
+		/** The hash of a baked rule is computed by the bake tool. */
+		void set_hash(unsigned int h) { hash_ = h; }
+
+	private:
+#endif
 		mutable unsigned int hash_ = DUMMY_HASH;
 	};
 
@@ -846,4 +855,28 @@ private:
 
 	/** Config used to parse global terrain rules */
 	static const inline game_config_view* rules_cfg_ = nullptr;
+
+	/** Applies @a rule at every location of the map where it matches. */
+	void apply_rule_to_map(const building_rule& rule);
+
+#ifdef N64_BUILD
+	// The console does not parse the global [terrain_graphics]: the rules the
+	// stock builder makes of them are in the baked image (src/n64/frozen), in
+	// precedence order. A rule is only built into RAM once some map has
+	// locations for each of its constraints; rules for terrain a map does not
+	// have are skipped by looking at their terrain matches alone.
+
+	/** The baked rule list in use, or nullptr (rules parsed from WML). */
+	static inline const unsigned char* frozen_rules_ = nullptr;
+	/** Baked rules built so far, by offset in the image. */
+	static inline std::unordered_map<std::uint32_t, std::unique_ptr<building_rule>> thawed_rules_{};
+	/** The image's terrain matches, built on first use. */
+	static inline std::vector<std::unique_ptr<t_translation::ter_match>> frozen_matches_{};
+	/** For this map: locations each baked match accepts (-1: not counted yet). */
+	std::vector<int> match_sizes_{};
+
+	int frozen_match_size(std::uint32_t id);
+	/** Baked rule @a index, or nullptr if it cannot match anywhere on this map. */
+	const building_rule* frozen_rule(std::uint32_t index);
+#endif
 };

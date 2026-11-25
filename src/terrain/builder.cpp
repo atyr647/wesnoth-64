@@ -20,6 +20,10 @@
 
 #include "terrain/builder.hpp"
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
+
 #include "game_config_view.hpp"
 #include "global.hpp"
 #include "gui/dialogs/loading_screen.hpp"
@@ -242,6 +246,11 @@ terrain_builder::terrain_builder(const config& level, const gamemap* m, const st
 	if(building_rules_.empty() && rules_cfg_) {
 		// off_map first to prevent some default rule seems to block it
 		add_off_map_rule(offmap_image);
+#ifdef N64_BUILD
+		// the global rules come from the baked image when it has them
+		frozen_rules_ = n64_frozen::terrain_rules();
+		if(!frozen_rules_)
+#endif
 		// parse global terrain rules
 		parse_global_config(*rules_cfg_);
 	} else {
@@ -280,6 +289,10 @@ void terrain_builder::set_terrain_rules_cfg(const game_config_view& cfg)
 {
 	rules_cfg_ = &cfg;
 	building_rules_.clear();
+#ifdef N64_BUILD
+	frozen_rules_ = nullptr;
+	thawed_rules_.clear();
+#endif
 }
 
 void terrain_builder::reload_map()
@@ -1168,63 +1181,234 @@ void terrain_builder::build_terrains()
 		}
 	}
 
-	for(const building_rule& rule : building_rules_) {
-		// Find the constraint that contains the less terrain of all terrain rules.
-		// We will keep a track of the matching terrains of this constraint
-		// and later try to apply the rule only on them
-		std::size_t min_size = std::numeric_limits<int>::max();
-		t_translation::ter_list min_types = t_translation::ter_list(); // <-- This must be explicitly initialized, just
-																	   // as min_constraint is, at start of loop, or we
-																	   // get a null pointer dereference when we go
-																	   // through on later times.
-		const terrain_constraint* min_constraint = nullptr;
+#ifdef N64_BUILD
+	if(frozen_rules_) {
+		match_sizes_.assign(n64_frozen::match_count(), -1);
 
-		for(const terrain_constraint& constraint : rule.constraints) {
-			const t_translation::ter_match& match = constraint.terrain_types_match;
-			t_translation::ter_list matching_types;
-			std::size_t constraint_size = 0;
-
-			for(terrain_by_type_map::iterator type_it = terrain_by_type_.begin(); type_it != terrain_by_type_.end();
-					++type_it) {
-				const t_translation::terrain_code t = type_it->first;
-				if(terrain_matches(t, match)) {
-					const std::size_t match_size = type_it->second.size();
-					constraint_size += match_size;
-					if(constraint_size >= min_size) {
-						break; // not a minimum, bail out
-					}
-					matching_types.push_back(t);
-				}
+		// Rules in RAM (the off-map rule and the scenario's local rules) and
+		// the baked global rules, in the order one multiset would hold them:
+		// by precedence, and for equal precedence in order of insertion (the
+		// off-map rule, the global rules, the local rules).
+		const std::uint32_t count = n64_frozen::rd32(frozen_rules_);
+		const unsigned char* const image = n64_frozen::image();
+		building_ruleset::const_iterator ram = building_rules_.begin();
+		std::uint32_t index = 0;
+		while(ram != building_rules_.end() || index < count) {
+			bool take_ram = index == count;
+			if(!take_ram && ram != building_rules_.end()) {
+				const int precedence = static_cast<std::int32_t>(
+					n64_frozen::rd32(image + n64_frozen::rd32(frozen_rules_ + 4 + index * 4)));
+				take_ram = ram->precedence < precedence || (ram->precedence == precedence && !ram->local);
 			}
-
-			if(constraint_size < min_size) {
-				min_size = constraint_size;
-				min_types = matching_types;
-				min_constraint = &constraint;
-				if(min_size == 0) {
-					// a constraint is never matched on this map
-					// we break with a empty type list
-					break;
+			if(take_ram) {
+				apply_rule_to_map(*ram);
+				++ram;
+			} else {
+				if(const building_rule* rule = frozen_rule(index)) {
+					apply_rule_to_map(*rule);
 				}
+				++index;
+			}
+		}
+		return;
+	}
+#endif
+	for(const building_rule& rule : building_rules_) {
+		apply_rule_to_map(rule);
+	}
+}
+
+void terrain_builder::apply_rule_to_map(const building_rule& rule)
+{
+	// Find the constraint that contains the less terrain of all terrain rules.
+	// We will keep a track of the matching terrains of this constraint
+	// and later try to apply the rule only on them
+	std::size_t min_size = std::numeric_limits<int>::max();
+	t_translation::ter_list min_types = t_translation::ter_list(); // <-- This must be explicitly initialized, just
+																   // as min_constraint is, at start of loop, or we
+																   // get a null pointer dereference when we go
+																   // through on later times.
+	const terrain_constraint* min_constraint = nullptr;
+
+	for(const terrain_constraint& constraint : rule.constraints) {
+		const t_translation::ter_match& match = constraint.terrain_types_match;
+		t_translation::ter_list matching_types;
+		std::size_t constraint_size = 0;
+
+		for(terrain_by_type_map::iterator type_it = terrain_by_type_.begin(); type_it != terrain_by_type_.end();
+				++type_it) {
+			const t_translation::terrain_code t = type_it->first;
+			if(terrain_matches(t, match)) {
+				const std::size_t match_size = type_it->second.size();
+				constraint_size += match_size;
+				if(constraint_size >= min_size) {
+					break; // not a minimum, bail out
+				}
+				matching_types.push_back(t);
 			}
 		}
 
-		assert(min_constraint != nullptr);
+		if(constraint_size < min_size) {
+			min_size = constraint_size;
+			min_types = matching_types;
+			min_constraint = &constraint;
+			if(min_size == 0) {
+				// a constraint is never matched on this map
+				// we break with a empty type list
+				break;
+			}
+		}
+	}
 
-		// NOTE: if min_types is not empty, we have found a valid min_constraint;
-		for(t_translation::ter_list::const_iterator t = min_types.begin(); t != min_types.end(); ++t) {
-			const std::vector<map_location>* locations = &terrain_by_type_[*t];
+	assert(min_constraint != nullptr);
 
-			for(std::vector<map_location>::const_iterator itor = locations->begin(); itor != locations->end(); ++itor) {
-				const map_location loc = legacy_difference(*itor, min_constraint->loc);
+	// NOTE: if min_types is not empty, we have found a valid min_constraint;
+	for(t_translation::ter_list::const_iterator t = min_types.begin(); t != min_types.end(); ++t) {
+		const std::vector<map_location>* locations = &terrain_by_type_[*t];
 
-				if(rule_matches(rule, loc, min_constraint)) {
-					apply_rule(rule, loc);
-				}
+		for(std::vector<map_location>::const_iterator itor = locations->begin(); itor != locations->end(); ++itor) {
+			const map_location loc = legacy_difference(*itor, min_constraint->loc);
+
+			if(rule_matches(rule, loc, min_constraint)) {
+				apply_rule(rule, loc);
 			}
 		}
 	}
 }
+
+#ifdef N64_BUILD
+namespace
+{
+/** Reads the words of a baked record. */
+struct frozen_reader
+{
+	const unsigned char* p;
+	std::uint32_t u() { const std::uint32_t v = n64_frozen::rd32(p); p += 4; return v; }
+	int i() { return static_cast<std::int32_t>(u()); }
+	std::string str()
+	{
+		const unsigned char* s = n64_frozen::image() + u();
+		return std::string(reinterpret_cast<const char*>(s + 4), n64_frozen::rd32(s));
+	}
+};
+} // namespace
+
+int terrain_builder::frozen_match_size(std::uint32_t id)
+{
+	int& size = match_sizes_[id];
+	if(size >= 0) {
+		return size;
+	}
+	if(frozen_matches_.size() <= id) {
+		frozen_matches_.resize(n64_frozen::match_count());
+	}
+	if(!frozen_matches_[id]) {
+		frozen_reader r{n64_frozen::terrain_match(id)};
+		auto match = std::make_unique<t_translation::ter_match>();
+		match->has_wildcard = r.u() != 0;
+		match->is_empty = r.u() != 0;
+		for(t_translation::ter_list* list : {&match->terrain, &match->mask, &match->masked_terrain}) {
+			const std::uint32_t n = r.u();
+			list->reserve(n);
+			for(std::uint32_t k = 0; k < n; ++k) {
+				const t_translation::ter_layer base = r.u();
+				const t_translation::ter_layer overlay = r.u();
+				list->emplace_back(base, overlay);
+			}
+		}
+		frozen_matches_[id] = std::move(match);
+	}
+	size = 0;
+	for(const auto& [terrain, locations] : terrain_by_type_) {
+		if(terrain_matches(terrain, *frozen_matches_[id])) {
+			size += locations.size();
+		}
+	}
+	return size;
+}
+
+const terrain_builder::building_rule* terrain_builder::frozen_rule(std::uint32_t index)
+{
+	const std::uint32_t offset = n64_frozen::rd32(frozen_rules_ + 4 + index * 4);
+	frozen_reader r{n64_frozen::image() + offset};
+	const int precedence = r.i();
+	const std::uint32_t constraints = r.u();
+	const unsigned char* const match_ids = r.p;
+	// A rule is applied from the locations of its constraint with the fewest
+	// candidates; with a constraint no location satisfies there are none.
+	for(std::uint32_t c = 0; c < constraints; ++c) {
+		if(frozen_match_size(n64_frozen::rd32(match_ids + c * 4)) == 0) {
+			return nullptr;
+		}
+	}
+	std::unique_ptr<building_rule>& slot = thawed_rules_[offset];
+	if(slot) {
+		return slot.get();
+	}
+
+	// Build the rule as parse_config, rotate_rule and load_images leave it.
+	r.p += constraints * 4;
+	auto rule = std::make_unique<building_rule>();
+	rule->precedence = precedence;
+	rule->probability = r.i();
+	rule->location_constraints.x = r.i();
+	rule->location_constraints.y = r.i();
+	rule->modulo_constraints.x = r.i();
+	rule->modulo_constraints.y = r.i();
+	rule->set_hash(r.u());
+	rule->constraints.resize(constraints);
+	for(std::uint32_t c = 0; c < constraints; ++c) {
+		terrain_constraint& cons = rule->constraints[c];
+		cons.terrain_types_match = *frozen_matches_[n64_frozen::rd32(match_ids + c * 4)];
+		cons.loc.x = r.i();
+		cons.loc.y = r.i();
+		cons.no_draw = r.u() != 0;
+		for(flag_list* flags : {&cons.set_flag, &cons.no_flag, &cons.has_flag}) {
+			for(std::uint32_t n = r.u(); n > 0; --n) {
+				flags->emplace_back(r.str());
+			}
+		}
+		cons.images.resize(r.u());
+		for(rule_image& ri : cons.images) {
+			ri.layer = r.i();
+			ri.basex = r.i();
+			ri.basey = r.i();
+			ri.global_image = r.u() != 0;
+			ri.center_x = r.i();
+			ri.center_y = r.i();
+			ri.is_water = r.u() != 0;
+			const std::uint32_t variants = r.u();
+			ri.variants.reserve(variants);
+			for(std::uint32_t v = 0; v < variants; ++v) {
+				rule_image_variant& variant = ri.variants.emplace_back(std::string(), std::string());
+				for(std::uint32_t n = r.u(); n > 0; --n) {
+					variant.tods.insert(r.str());
+				}
+				for(std::uint32_t n = r.u(); n > 0; --n) {
+					variant.has_flag.emplace_back(r.str());
+				}
+				variant.random_start = std::chrono::milliseconds{r.i()};
+				variant.images.resize(r.u());
+				for(animated<image::locator>& anim : variant.images) {
+					for(std::uint32_t n = r.u(); n > 0; --n) {
+						const std::chrono::milliseconds duration{r.i()};
+						const std::string filename = r.str();
+						const std::string modifications = r.str();
+						if(ri.global_image) {
+							anim.add_frame(duration, image::locator(filename, cons.loc, ri.center_x, ri.center_y, modifications));
+						} else {
+							anim.add_frame(duration, image::locator(filename, modifications));
+						}
+					}
+					anim.start_animation(0ms, true);
+				}
+			}
+		}
+	}
+	slot = std::move(rule);
+	return slot.get();
+}
+#endif
 
 terrain_builder::tile* terrain_builder::get_tile(const map_location& loc)
 {
