@@ -37,7 +37,44 @@ PI 0x14000000 (config ROM_EXTENDED_ENABLE). The full image is about
 The libdragon USB log reserves the top 8 MiB of SDRAM; release images are
 built with -DN64_USB_LOG=OFF.
 
-## Plan (each step keeps the engine's behaviour identical)
+## Change of approach: bake on the host, read in place from ROM
+
+Measured before the change (profiled Heir to the Throne run): 14.7 MiB of
+code and an 84 MiB heap paged through 3.3 MiB of frames; 88% of the time to
+the first map frame in page faults; frames 13-200 s apart. Tuning the pager
+(more frames while loading, faster swap compression) gained 7%. Shrinking
+the heap does not change the shape: the console repeats, on every boot, work
+whose result never changes.
+
+The port now moves that work to ROM build time. The rules code (combat,
+movement, AI, WML events, Lua) stays the engine's own source.
+
+1. **WML (done).** `tools/n64-bake-config.sh` compiles every config the game
+   can load (cores list and WML tree for the title screen, multiplayer, test,
+   editor, each campaign at each difficulty: 138 roots, 3.67 million nodes)
+   with the stock preprocessor and parser into one image with identical
+   subtrees and strings stored once: 149 thousand nodes, 13.6 MiB (3.7 MiB
+   gzipped), 45 s. It is linked into the paged read-only data
+   (`-DN64_FROZEN_IMAGE`); `config` copies a node into RAM when it is first
+   used (`config::thaw_impl_`). `--n64-check-frozen` recomputes on the
+   console the hash the tool stored from the stock loader's result.
+   Measured: title config 38 s -> 10 s, campaign config 155 s -> 22 s, unit
+   types 142 s -> 79 s, heap at game start 73 MiB -> 43 MiB.
+2. **Terrain rules (next).** Parsing `[terrain_graphics]` into
+   `building_rules_` and building the map is now the largest stage (724 s;
+   string compares, rule sorting, image existence checks on the SD card).
+   Bake the parsed, rotated, sorted rule set, with image existence resolved.
+3. **Unit types, GUI definitions, fonts.** Same treatment where the profile
+   says so.
+4. **Presentation.** A loading-screen frame references about 3.5 MiB of code
+   and 2-4 MiB of heap (`[workset]` lines with `--n64-watchdog`), more than
+   the 3.3 MiB of frames. The desktop GUI toolkit and text stack are to be
+   replaced by console-built screens that keep the stock look, with
+   pre-rendered fonts.
+5. **Image layout.** One .z64 of at most 64 MiB, nothing on the SD card
+   (decision). The baked data must be stored compressed in ROM.
+
+## Superseded plan (heap compaction)
 
 1. **Terrain graphics rules (20 MiB).** Compact the rule representation:
    interned image names and flags, shared locators, no per-rotation copies
