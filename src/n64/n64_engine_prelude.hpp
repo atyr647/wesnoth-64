@@ -56,17 +56,19 @@ inline long SSLeay() { return 0x1010100fL; }
 #ifndef OPENSSL_EVP_H
 #define OPENSSL_EVP_H
 #define OPENSSL_ERR_H
-// Stub the functions used by preferences for password hashing
-typedef void EVP_MD_CTX;
-typedef void EVP_MD;
-inline EVP_MD_CTX* EVP_MD_CTX_new() { return nullptr; }
-inline void EVP_MD_CTX_free(EVP_MD_CTX*) {}
-inline const EVP_MD* EVP_md5() { return nullptr; }
-inline const EVP_MD* EVP_sha256() { return nullptr; }
+// Message digests: MD5 only (utils::md5 in hash.cpp), implemented in
+// src/n64/n64_md5.cpp. Wesnoth names its config cache files by the MD5 of the
+// preprocessor defines, so this must be the real thing.
+typedef struct n64_md5_ctx EVP_MD_CTX;
+typedef struct n64_evp_md EVP_MD;
+EVP_MD_CTX* EVP_MD_CTX_new();
+void EVP_MD_CTX_free(EVP_MD_CTX*);
+const EVP_MD* EVP_md5();
+inline const EVP_MD* EVP_sha256() { return nullptr; }   // not supported (online play only)
 inline int EVP_MD_size(const EVP_MD*) { return 16; }
-inline int EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, void*) { return 0; }
-inline int EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t) { return 0; }
-inline int EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*) { return 0; }
+int EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, void*);
+int EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t);
+int EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*);
 // Cipher API: used only to store multiplayer server passwords (online play).
 // Every call fails, so preferences.cpp logs the error and stores nothing.
 typedef struct n64_evp_cipher_ctx EVP_CIPHER_CTX;
