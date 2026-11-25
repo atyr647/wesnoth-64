@@ -902,6 +902,7 @@ if(N64_BUILD)
         n64_pixman
         n64_harfbuzz
         n64_freetype
+        n64_zlib
         wesnoth_n64_stubs
         ${N64_LIBDRAGON_PAGED}
         ${N64_INST}/mips64-elf/lib/libdragonsys.a

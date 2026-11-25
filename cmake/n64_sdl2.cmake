@@ -81,6 +81,18 @@ target_compile_definitions(n64_webp PRIVATE malloc=n64_vmalloc calloc=n64_vcallo
                                           realloc=n64_vrealloc free=n64_vfree)
 target_compile_options(n64_webp PRIVATE ${N64_SDL_COMPILE_OPTIONS})
 
+# zlib: gzip for Wesnoth's compressed WML (config cache, saved games), through
+# the boost::iostreams filtering_stream of src/n64/sdl2_stubs. Its working
+# memory is allocated by the caller (zalloc), from the swappable heap.
+set(N64_ZLIB_DIR "${N64_DEPS_SOURCE_DIR}/zlib")
+add_library(n64_zlib STATIC EXCLUDE_FROM_ALL
+    "${N64_ZLIB_DIR}/adler32.c" "${N64_ZLIB_DIR}/crc32.c" "${N64_ZLIB_DIR}/deflate.c"
+    "${N64_ZLIB_DIR}/inffast.c" "${N64_ZLIB_DIR}/inflate.c" "${N64_ZLIB_DIR}/inftrees.c"
+    "${N64_ZLIB_DIR}/trees.c" "${N64_ZLIB_DIR}/zutil.c")
+target_include_directories(n64_zlib PUBLIC "${N64_ZLIB_DIR}")
+target_compile_definitions(n64_zlib PRIVATE Z_SOLO NO_GZIP_FILES)
+target_compile_options(n64_zlib PRIVATE ${N64_SDL_COMPILE_OPTIONS})
+
 # SDL_image: PNG and JPEG through its bundled stb_image, WebP through libwebp
 # (src/n64/sdl2/IMG_webp_n64.c: scaled decoding of oversized images); PNG
 # saving through its bundled miniz.

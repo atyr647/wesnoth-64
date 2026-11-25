@@ -1920,7 +1920,7 @@ using logic::indeterminate;
 namespace boost { namespace iostreams {
     struct gzip_params { int level; gzip_params(int l = 6) : level(l) {} };
     struct bzip2_params { int block_size; bzip2_params(int b = 9) : block_size(b) {} };
-    struct gzip_compressor { gzip_compressor() {} gzip_compressor(const gzip_params&) {} };
+    struct gzip_compressor { int level = -1; gzip_compressor() {} gzip_compressor(const gzip_params& p) : level(p.level) {} };
     struct bzip2_compressor { bzip2_compressor() {} bzip2_compressor(const bzip2_params&) {} };
     struct gzip_decompressor {};
     struct bzip2_decompressor {};

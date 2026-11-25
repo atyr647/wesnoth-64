@@ -22,3 +22,4 @@ fetch freetype  https://gitlab.freedesktop.org/freetype/freetype.git VER-2-13-3
 fetch harfbuzz  https://github.com/harfbuzz/harfbuzz.git            10.1.0
 fetch pixman    https://gitlab.freedesktop.org/pixman/pixman.git    pixman-0.44.2
 fetch cairo     https://gitlab.freedesktop.org/cairo/cairo.git      1.18.2
+fetch zlib      https://github.com/madler/zlib.git                  v1.3.1
