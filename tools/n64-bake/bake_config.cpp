@@ -43,6 +43,8 @@
 #include "picture.hpp"
 #include "game_config.hpp"
 #include "log.hpp"
+#include "serialization/parser.hpp"
+#include "serialization/preprocessor.hpp"
 #include "serialization/string_utils.hpp"
 #include "tstring.hpp"
 #include "utils/variant.hpp"
@@ -359,6 +361,31 @@ int main(int argc, char** argv)
 	for(const auto& set : sets) {
 		bake(cores, set);
 		bake(tree, set);
+	}
+
+	// Data files the engine preprocesses and parses on its own, without
+	// defines: GUI definitions, fonts, languages, achievements, AI configurations.
+	std::vector<std::string> files = {"data/gui/_main.cfg", "data/hardwired/fonts.cfg", "data/hardwired/language.cfg",
+		"data/achievements.cfg"};
+	{
+		std::vector<std::string> ai;
+		filesystem::get_files_in_dir(game_config::path + "/data/ai/ais", &ai, nullptr, filesystem::name_mode::ENTIRE_FILE_PATH);
+		std::sort(ai.begin(), ai.end());
+		for(const std::string& f : ai) {
+			files.push_back(relative(f));
+		}
+	}
+	for(const std::string& file : files) {
+		preproc_map defines;
+		const config cfg = io::read(*preprocess_file(game_config::path + "/" + file, defines));
+		const std::size_t before = out.size();
+		root r;
+		r.node = add_node(cfg);
+		r.key = add_string("file:" + file + "|");
+		r.hash = n64_frozen::check_hash(cfg);
+		r.terrain = 0;
+		roots.push_back(r);
+		std::printf("%-58s +%6zu KiB\n", ("file:" + file).c_str(), (out.size() - before) >> 10);
 	}
 
 	const std::uint32_t table = out.size();

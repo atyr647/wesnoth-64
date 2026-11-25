@@ -13,6 +13,9 @@
 	See the COPYING file for more details.
 */
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 #include "font/font_config.hpp"
 #include "font/error.hpp"
 
@@ -77,8 +80,15 @@ font_families families;
 
 bool load_font_config()
 try {
-	auto stream = preprocess_file(filesystem::get_wml_location("hardwired/fonts.cfg").value());
-	families = font_families{ io::read(*stream).mandatory_child("fonts") };
+#ifdef N64_BUILD
+	if(const unsigned char* baked = n64_frozen::find_file(filesystem::get_wml_location("hardwired/fonts.cfg").value())) {
+		families = font_families{ config::from_frozen(baked).mandatory_child("fonts") };
+	} else
+#endif
+	{
+		auto stream = preprocess_file(filesystem::get_wml_location("hardwired/fonts.cfg").value());
+		families = font_families{ io::read(*stream).mandatory_child("fonts") };
+	}
 	return true;
 
 } catch(const utils::bad_optional_access&) {

@@ -6,6 +6,7 @@
 
 #include "n64_frozen_format.hpp"
 
+#include <string>
 #include <string_view>
 
 namespace n64_frozen
@@ -22,6 +23,13 @@ struct root_info
 
 /** Looks up the root baked for @a key ("<file>|<defines>"). */
 bool find_root(std::string_view key, root_info& info);
+
+/**
+ * The baked config of a data file the engine reads on its own, without
+ * preprocessor defines (GUI definitions, fonts, languages, achievements, AI
+ * configurations): the node, or nullptr if @a path was not baked.
+ */
+const unsigned char* find_file(const std::string& path);
 
 /**
  * The terrain rule list (see the format) that goes with the game config in

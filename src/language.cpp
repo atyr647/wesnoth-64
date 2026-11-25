@@ -13,6 +13,9 @@
 	See the COPYING file for more details.
 */
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 #include "filesystem.hpp"
 #include "gettext.hpp"
 #include "language.hpp"
@@ -116,7 +119,13 @@ language_def::language_def(const config& cfg)
 bool load_language_list()
 {
 	try {
+#ifdef N64_BUILD
+		const std::string language_file = filesystem::get_wml_location("hardwired/language.cfg").value();
+		const unsigned char* baked = n64_frozen::find_file(language_file);
+		config cfg = baked ? config::from_frozen(baked) : io::read(*preprocess_file(language_file));
+#else
 		config cfg = io::read(*preprocess_file(filesystem::get_wml_location("hardwired/language.cfg").value()));
+#endif
 
 		known_languages.clear();
 		known_languages.emplace_back(); // System default language

@@ -15,6 +15,9 @@
 
 #define GETTEXT_DOMAIN "wesnoth-lib"
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 #include "gui/gui.hpp"
 
 #include "config_cache.hpp"
@@ -39,6 +42,9 @@ try {
 	defines.try_emplace("ANDROID");
 #endif
 #ifdef N64_BUILD
+	if(const unsigned char* baked = n64_frozen::find_file(path)) {
+		return config::from_frozen(baked);
+	}
 	// The schema check only logs problems, and validating the mainline GUI
 	// peaks at ~26 MB on a 32-bit target. On the console the GUI data is
 	// validated with this same schema at build time instead.

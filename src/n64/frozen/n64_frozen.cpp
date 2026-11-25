@@ -3,6 +3,8 @@
  */
 #include "n64_frozen.hpp"
 
+#include "filesystem.hpp"
+
 #include <cstring>
 
 extern "C" {
@@ -45,6 +47,24 @@ bool find_root(std::string_view key, root_info& info)
 		}
 	}
 	return false;
+}
+
+const unsigned char* find_file(const std::string& path)
+{
+	if(!image()) {
+		return nullptr;
+	}
+	// key: "file:" and the path below the game directory
+	std::string key = "file:";
+	std::size_t i = path.compare(0, game_config::path.size(), game_config::path) == 0 ? game_config::path.size() : 0;
+	for(; i < path.size(); ++i) {
+		if(path[i] != '/' || (key.size() > 5 && key.back() != '/')) {
+			key += path[i];
+		}
+	}
+	key += '|';
+	root_info info;
+	return find_root(key, info) ? info.node : nullptr;
 }
 
 namespace

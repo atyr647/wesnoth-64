@@ -19,6 +19,9 @@
  * @file
  */
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 #include "ai/configuration.hpp"
 
 #include "filesystem.hpp"
@@ -183,8 +186,15 @@ const config& configuration::get_ai_config_for(const std::string& id)
 bool configuration::get_side_config_from_file(const std::string& file, config& cfg)
 {
 	try {
-		filesystem::scoped_istream stream = preprocess_file(filesystem::get_wml_location(file).value());
-		cfg = io::read(*stream);
+#ifdef N64_BUILD
+		if(const unsigned char* baked = n64_frozen::find_file(filesystem::get_wml_location(file).value())) {
+			cfg = config::from_frozen(baked);
+		} else
+#endif
+		{
+			filesystem::scoped_istream stream = preprocess_file(filesystem::get_wml_location(file).value());
+			cfg = io::read(*stream);
+		}
 		LOG_AI_CONFIGURATION << "Reading AI configuration from file '" << file  << "'";
 	} catch(const config::error&) {
 		ERR_AI_CONFIGURATION << "Error while reading AI configuration from file '" << file  << "'";

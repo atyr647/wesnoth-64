@@ -13,6 +13,9 @@
 	See the COPYING file for more details.
 */
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 #include "achievements.hpp"
 
 #include "filesystem.hpp"
@@ -137,6 +140,11 @@ void achievements::reload()
  */
 config achievements::read_achievements_file(const std::string& path)
 {
+#ifdef N64_BUILD
+	if(const unsigned char* baked = n64_frozen::find_file(path)) {
+		return config::from_frozen(baked);
+	}
+#endif
 	if(filesystem::file_exists(path)) {
 		return io::read(*preprocess_file(path));
 	} else {
