@@ -151,18 +151,6 @@ static SDL_bool make_room(N64_RenderData *d, size_t need, N64_Texture *keep)
     return d->used + need <= d->budget;
 }
 
-/* A render target's CPU copy only matters while it is not resident: once
-   the RDRAM copy is up to date it is freed (and rebuilt by download() on
-   eviction), so screen-sized targets are not held twice. */
-static void drop_target_copy(N64_Texture *t)
-{
-    if (t->target && t->cpu && t->gpu.buffer) {
-        SDL_free(t->cpu);
-        t->cpu = NULL;
-        t->cpu_stale = SDL_TRUE;
-    }
-}
-
 /* Make sure t has an RDRAM copy that is up to date. */
 static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
 {
@@ -176,7 +164,6 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
             for (y = 0; y < t->sh; ++y)
                 SDL_memcpy((Uint8 *)t->gpu.buffer + y * t->gpu.stride, t->cpu + y * t->sw * 4, t->sw * 4);
             t->gpu_stale = SDL_FALSE;
-            drop_target_copy(t);
         }
         return SDL_TRUE;
     }
@@ -220,7 +207,6 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
     }
     t->gpu_stale = SDL_FALSE;
     t->alpha_dirty = SDL_FALSE;
-    drop_target_copy(t);
     return SDL_TRUE;
 }
 
@@ -947,7 +933,9 @@ static SDL_Renderer *N64R_CreateRenderer(SDL_Window *window, Uint32 flags)
     sys_get_heap_stats(&hs);
     {
         const long free_bytes = (long)hs.total - (long)hs.used;
+        const char* cap = SDL_GetHint("N64_TEXTURE_BUDGET_KB");   /* testing: a smaller budget */
         d->budget = free_bytes > (1536 << 10) ? (size_t)(free_bytes - (512 << 10)) : (1024 << 10);
+        if (cap && SDL_atoi(cap) > 0 && (size_t)SDL_atoi(cap) << 10 < d->budget) d->budget = (size_t)SDL_atoi(cap) << 10;
         SDL_Log("n64 renderer: %ld KiB physical RAM free, %lu KiB for textures",
                 free_bytes >> 10, (unsigned long)(d->budget >> 10));
     }

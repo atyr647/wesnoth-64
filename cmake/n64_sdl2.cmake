@@ -132,6 +132,18 @@ target_link_options(wesnoth_n64_sdltest PRIVATE
 target_link_libraries(wesnoth_n64_sdltest PRIVATE n64_sdl2_image n64_sdl2
     ${N64_INST}/mips64-elf/lib/libdragon.a ${N64_INST}/mips64-elf/lib/libdragonsys.a m c gcc)
 n64_create_rom(wesnoth_n64_sdltest)
+# The same, testing that render targets keep their contents under texture
+# memory pressure (Wesnoth's game display pattern).
+add_executable(wesnoth_n64_sdltest_persist EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/src/n64/sdl2/test/n64_sdl_test.c
+    ${CMAKE_BINARY_DIR}/sdltest_cursor.c ${CMAKE_BINARY_DIR}/sdltest_unit.c ${CMAKE_BINARY_DIR}/sdltest_tile.c)
+target_compile_definitions(wesnoth_n64_sdltest_persist PRIVATE PERSIST_TEST)
+target_compile_options(wesnoth_n64_sdltest_persist PRIVATE -O2)
+target_link_options(wesnoth_n64_sdltest_persist PRIVATE
+    -T ${CMAKE_BINARY_DIR}/wesnoth_n64.ld -Wl,--wrap=__do_global_ctors -Wl,--gc-sections)
+target_link_libraries(wesnoth_n64_sdltest_persist PRIVATE n64_sdl2_image n64_sdl2
+    ${N64_INST}/mips64-elf/lib/libdragon.a ${N64_INST}/mips64-elf/lib/libdragonsys.a m c gcc)
+n64_create_rom(wesnoth_n64_sdltest_persist)
 
 # SDL_mixer: WAV and Ogg Vorbis (its bundled stb_vorbis), the formats
 # Wesnoth's sounds and music use.
