@@ -847,7 +847,15 @@ texture get_lighted_texture(const image::locator& i_locator, const std::vector<l
 	}
 
 	// not cached yet, generate it
+#ifdef N64_BUILD
+	// The console builds the lit surface without also caching it in
+	// lit_surfaces_ (get_lighted_image): the lit texture is cached, and
+	// keeping every lit surface as well grows the heap without bound as the
+	// map is drawn. The pixels are the same.
+	texture tex(apply_light(get_surface(i_locator, HEXED).clone(), ls));
+#else
 	texture tex(get_lighted_image(i_locator, ls));
+#endif
 
 	// record the lighted texture in the corresponding variants cache
 	lvar[ls] = tex;
