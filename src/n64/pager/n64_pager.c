@@ -532,9 +532,43 @@ static int fix_zero_extended_base(exception_t* ex) {
     return 1;
 }
 
+// The VR4300 converts a 64-bit integer to floating point (cvt.d.l, cvt.s.l)
+// in hardware only when it fits in 53 bits; otherwise it raises an
+// "unimplemented operation" exception and expects software to do it. Desktop
+// code converts large 64-bit values freely (e.g. nanosecond time stamps), so
+// do the conversion here: exact high half times 2^32 plus the low half,
+// rounded once (the 32-bit conversions never trap).
+static int emulate_cvt_from_long(exception_t* ex) {
+    if (ex->regs->cr & (1u << 31)) return 0;                 // in a branch delay slot: not expected
+    if (!(ex->regs->fc31 & (1u << 17))) return 0;            // cause: unimplemented operation
+    uint32_t insn = *(volatile uint32_t*)ex->regs->epc;
+    if ((insn >> 26) != 0x11 || ((insn >> 21) & 31) != 0x15) return 0;   // COP1, fmt = L
+    uint32_t funct = insn & 63;
+    if (funct != 0x20 && funct != 0x21) return 0;            // cvt.s.l / cvt.d.l
+    uint32_t fs = (insn >> 11) & 31, fd = (insn >> 6) & 31;
+    int64_t v = (int64_t)ex->regs->fpr[fs];
+    int32_t hi = (int32_t)(v >> 32);
+    uint32_t lo = (uint32_t)v;
+    double d = (double)hi * 4294967296.0 + ((double)(int32_t)(lo ^ 0x80000000u) + 2147483648.0);
+    if (funct == 0x21) {
+        uint64_t bits;
+        memcpy(&bits, &d, sizeof bits);
+        ex->regs->fpr[fd] = bits;
+    } else {
+        float f = (float)d;
+        uint32_t bits;
+        memcpy(&bits, &f, sizeof bits);
+        ex->regs->fpr[fd] = (ex->regs->fpr[fd] & 0xFFFFFFFF00000000ull) | bits;
+    }
+    ex->regs->fc31 &= ~(0x3Fu << 12);                        // clear the cause bits
+    ex->regs->epc += 4;
+    return 1;
+}
+
 static void pager_exception(exception_t* ex) {
     uint32_t code = C0_GET_CAUSE_EXC_CODE(ex->regs->cr);
     if (code == EXCEPTION_CODE_RESERVED_INSTRUCTION && emulate_rdhwr(ex)) return;
+    if (code == EXCEPTION_CODE_FLOATING_POINT && emulate_cvt_from_long(ex)) return;
     if (code == EXCEPTION_CODE_TLB_LOAD_I_MISS || code == EXCEPTION_CODE_TLB_STORE_MISS ||
         code == EXCEPTION_CODE_TLB_MODIFICATION) {
         int32_t page = va_page(C0_BADVADDR());

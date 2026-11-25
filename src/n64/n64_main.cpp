@@ -16,6 +16,8 @@
 #  endif
 #include "netlib_adapter.hpp"
 
+#include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -68,6 +70,21 @@ void eh_selftest() {
 // std::this_thread::sleep_for (n64_threading_shim.hpp).
 extern "C" void n64_sleep_us(unsigned long long us) {
     SDL_Delay(static_cast<Uint32>((us + 999) / 1000));
+}
+
+// std::chrono::steady_clock::now(), linked with
+// --wrap=_ZNSt6chrono3_V212steady_clock3nowEv. libstdc++ builds it on
+// gettimeofday(), whose epoch is 1970 (n64_libgcc.c): nanoseconds since then
+// are about 1.8e18, and converting such a difference to double (cvt.d.l)
+// raises an "unimplemented operation" exception on the VR4300, which only
+// converts integers below 2^53 in hardware. The steady clock's epoch is
+// unspecified by the standard; here it is power-on.
+extern "C" uint64_t get_ticks_us(void);
+std::chrono::steady_clock::time_point n64_steady_clock_now()
+    asm("__wrap__ZNSt6chrono3_V212steady_clock3nowEv");
+std::chrono::steady_clock::time_point n64_steady_clock_now() {
+    return std::chrono::steady_clock::time_point(
+        std::chrono::nanoseconds(static_cast<long long>(get_ticks_us()) * 1000));
 }
 
 // Wesnoth's real entry point (src/wesnoth.cpp, renamed for N64).
