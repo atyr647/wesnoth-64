@@ -787,17 +787,17 @@ public:
 	/** In-order iteration over all children. */
 	template<typename Self>
 	auto all_children_view(this Self&& self)
-	{ return self.ordered_children_ | std::views::transform(&config::any_tag_view<Self>); }
+	{ return self.ordered_children_() | std::views::transform(&config::any_tag_view<Self>); }
 
 #else
 
 	/** In-order iteration over all children. */
 	auto all_children_view() const
-	{ return ordered_children_ | utils::views::transform(&config::any_tag_view<const config&>); }
+	{ return ordered_children_() | utils::views::transform(&config::any_tag_view<const config&>); }
 
 	/** In-order iteration over all children. */
 	auto all_children_view()
-	{ return ordered_children_ | utils::views::transform(&config::any_tag_view<config&>); }
+	{ return ordered_children_() | utils::views::transform(&config::any_tag_view<config&>); }
 
 #endif // __cpp_explicit_this_parameter
 
@@ -902,7 +902,7 @@ public:
 	/** A non-owning view over all child tag names. */
 	auto child_name_view() const
 	{
-		return children_ | utils::views::keys;
+		return children_() | utils::views::keys;
 	}
 
 private:
@@ -912,12 +912,43 @@ private:
 	std::vector<child_pos>::iterator remove_child(const child_map::iterator &l, std::size_t pos);
 
 	/** All the attributes of this node. */
-	attribute_map values_;
+	mutable attribute_map values_store_;
 
 	/** A list of all children of this node. */
-	child_map children_;
+	mutable child_map children_store_;
 
-	std::vector<child_pos> ordered_children_;
+	mutable std::vector<child_pos> ordered_children_store_;
+
+	// Every use of the three containers goes through these accessors. On the
+	// console a config can stand for a node of the baked, read-only WML image
+	// in ROM (src/n64/frozen): its contents are copied into the containers
+	// when they are first used, its children staying in ROM until they are
+	// used themselves. Copying a config that has not been used yet copies
+	// only the reference.
+#ifdef N64_BUILD
+	mutable const unsigned char* frozen_ = nullptr;
+	void thaw_impl_() const;
+	void thaw_() const { if(frozen_) { thaw_impl_(); } }
+
+public:
+	/** A config standing for @a node of the baked WML image. */
+	static config from_frozen(const unsigned char* node)
+	{
+		config res;
+		res.frozen_ = node;
+		return res;
+	}
+
+private:
+#else
+	void thaw_() const {}
+#endif
+	attribute_map& values_() { thaw_(); return values_store_; }
+	const attribute_map& values_() const { thaw_(); return values_store_; }
+	child_map& children_() { thaw_(); return children_store_; }
+	const child_map& children_() const { thaw_(); return children_store_; }
+	std::vector<child_pos>& ordered_children_() { thaw_(); return ordered_children_store_; }
+	const std::vector<child_pos>& ordered_children_() const { thaw_(); return ordered_children_store_; }
 };
 
 

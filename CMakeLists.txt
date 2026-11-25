@@ -810,6 +810,18 @@ if(N64_BUILD)
     # would not carry the file names cmake/n64_paged.ld selects on.
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/n64_vheap.cpp src/n64/pager/n64_throwlog.cpp
         src/n64/pager/n64_eh_sext.S)
+    # The game's WML, compiled on the host by tools/n64-bake-config.sh into a
+    # read-only image the config class reads in place (src/n64/frozen).
+    # Without -DN64_FROZEN_IMAGE=<file> the console preprocesses and parses
+    # the WML itself, which takes tens of minutes.
+    set(N64_FROZEN_IMAGE "" CACHE FILEPATH "Baked WML image (tools/n64-bake-config.sh)")
+    target_sources(wesnoth_n64 PRIVATE src/n64/frozen/n64_frozen.cpp)
+    if(N64_FROZEN_IMAGE)
+        target_sources(wesnoth_n64 PRIVATE src/n64/frozen/n64_frozen_image.S)
+        set_source_files_properties(src/n64/frozen/n64_frozen_image.S PROPERTIES
+            COMPILE_DEFINITIONS "N64_FROZEN_IMAGE=\"${N64_FROZEN_IMAGE}\""
+            OBJECT_DEPENDS "${N64_FROZEN_IMAGE}")
+    endif()
     # LZ4 compressor for the pager's compressed swap (resident, see n64_paged.ld).
     target_sources(wesnoth_n64 PRIVATE src/n64/pager/lz4/lz4.c)
     set_source_files_properties(src/n64/pager/lz4/lz4.c PROPERTIES COMPILE_OPTIONS "-fno-lto;-O2" COMPILE_DEFINITIONS "LZ4_MEMORY_USAGE=12")

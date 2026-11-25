@@ -16,6 +16,9 @@
 #include "game_config_manager.hpp"
 #include "serialization/parser.hpp"
 #include <sstream>
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
 
 #include "about.hpp"
 #include "addon/manager.hpp"
@@ -804,6 +807,10 @@ void game_config_manager::set_enabled_addon_all()
 // with their attributes left in place for code that lists or looks up ids.
 void game_config_manager::pack_scenarios()
 {
+	if(n64_frozen::image()) {
+		// Baked configs keep unused scenarios in ROM already.
+		return;
+	}
 	for(config& sc : game_config_.child_range("scenario")) {
 		const std::string id = sc["id"].str();
 		if(id.empty() || sc.all_children_count() == 0 || packed_scenarios_.count(id)) {

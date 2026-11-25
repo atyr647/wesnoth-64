@@ -25,6 +25,10 @@
 #include "serialization/string_utils.hpp"
 #include "game_version.hpp"
 
+#ifdef N64_BUILD
+#include "n64/frozen/n64_frozen.hpp"
+#endif
+
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 
@@ -282,6 +286,44 @@ config config_cache::load_configs(const std::string& config_path, abstract_valid
 	// Make sure that we have fake transaction if no real one is going on
 	fake_transaction fake;
 
+#ifdef N64_BUILD
+	// The console does not preprocess or parse the game's WML: every config
+	// it can load was compiled into the ROM by tools/n64-bake, keyed by the
+	// file and the names of the active defines. The config returned here
+	// stands for the baked root and copies nodes into RAM as they are used.
+	if(n64_frozen::image()) {
+		preproc_map builtin;
+		add_builtin_defines(builtin);
+
+		std::string path = config_path;
+		if(path.compare(0, game_config::path.size(), game_config::path) == 0) {
+			path.erase(0, game_config::path.size());
+		}
+		std::string key;
+		for(const char c : path) {
+			if(c != '/' || (!key.empty() && key.back() != '/')) {
+				key += c;
+			}
+		}
+		while(!key.empty() && key.back() == '/') {
+			key.pop_back();
+		}
+		key += '|';
+		bool first = true;
+		for(const auto& [name, define] : defines_map_) {   // sorted by name
+			if(builtin.count(name) == 0) {
+				key += first ? "" : ",";
+				key += name;
+				first = false;
+			}
+		}
+		if(const unsigned char* node = n64_frozen::find_root(key)) {
+			PLAIN_LOG << "[frozen] using the baked config for '" << key << "'";
+			return config::from_frozen(node);
+		}
+		PLAIN_LOG << "[frozen] no baked config for '" << key << "': loading from files";
+	}
+#endif
 	if(use_cache_) {
 		return read_cache(config_path, validator);
 	} else {
