@@ -196,8 +196,12 @@ static SDL_bool resident(N64_RenderData *d, N64_Texture *t)
             static int logged;
             if (logged < 20) {
                 ++logged;
-                debugf("[n64render] cannot allocate %dx%d texture (%lu KiB; %lu of %lu KiB in use)\n", t->sw, t->sh,
-                       (unsigned long)(tex_bytes(t) >> 10), (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10));
+                heap_stats_t hs;
+                sys_get_heap_stats(&hs);
+                debugf("[n64render] cannot allocate %dx%d texture (%lu KiB; %lu of %lu KiB in use); "
+                       "physical heap: %d KiB total, %d KiB used\n", t->sw, t->sh,
+                       (unsigned long)(tex_bytes(t) >> 10), (unsigned long)(d->used >> 10), (unsigned long)(d->budget >> 10),
+                       hs.total >> 10, hs.used >> 10);
             }
             SDL_OutOfMemory();
             return SDL_FALSE;
