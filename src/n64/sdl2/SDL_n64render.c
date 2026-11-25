@@ -89,6 +89,7 @@ static size_t s_lent;
 static void *s_render_data;
 /* CPU profile hook (src/n64/pager): dumped after each big frame (the map). */
 extern void n64_pager_profile_dump(const char* why) __attribute__((weak));
+extern void n64_pager_workset_report(const char* why) __attribute__((weak));
 static unsigned s_frame_copies;
 static struct { unsigned copies, skipped, skip_room, skip_self, skip_tiny, fills, clears, queues, uploads; uint64_t last_log; } s_diag;
 
@@ -923,6 +924,7 @@ static int N64R_RenderPresent(SDL_Renderer *renderer)
     d->target = keep;
     ++d->frame;
     if (s_frame_copies >= 1000 && n64_pager_profile_dump) n64_pager_profile_dump("after a frame of 1000+ copies");
+    if (n64_pager_workset_report) n64_pager_workset_report("frame");
     s_frame_copies = 0;
     if (get_ticks() - s_diag.last_log > TICKS_PER_SECOND * 5ull) {
         int n = 0;

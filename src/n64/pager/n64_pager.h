@@ -55,6 +55,8 @@ void n64_pager_start_watchdog(void);
 
 // Print the CPU profile since the previous dump (no-op without the watchdog).
 void n64_pager_profile_dump(const char* why);
+/** With the watchdog: log the distinct pages referenced since the last call. */
+void n64_pager_workset_report(const char* why);
 
 // Size in bytes of the swappable heap at VH_BASE (0 if not available).
 uint32_t n64_pager_heap_size(void);

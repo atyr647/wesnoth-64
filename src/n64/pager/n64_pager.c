@@ -149,6 +149,9 @@ static inline void tlb_wr(void)                   { asm volatile("tlbwr; nop; no
 
 #define PAGEMASK_16K 0x00006000u
 
+static uint8_t s_touched[MAX_PAGES];   // pages referenced since the last working-set report
+static int s_ws_on;
+
 static inline uint32_t entry_lo(uint32_t page) {
     if (page >= s_ncode + s_nheap || s_pte[page] == NO_FRAME) return 1u;   // invalid, global
     uint32_t phys = PhysicalAddr(frame_addr(s_pte[page]));
@@ -171,8 +174,10 @@ static void tlb_set_pair(uint32_t page, int insert) {
     tlb_probe();
     uint32_t idx = tlb_read_index();
     if ((idx & 0x80000000u) && !insert) { C0_WRITE_STATUS(sr); return; }
-    tlb_write_lo0(entry_lo(even));
-    tlb_write_lo1(entry_lo(even + 1));
+    // While measuring the working set, a page is only mapped once it has
+    // itself been referenced (its pair partner would otherwise go uncounted).
+    tlb_write_lo0(s_ws_on && !s_touched[even] ? 1u : entry_lo(even));
+    tlb_write_lo1(s_ws_on && (even + 1 >= MAX_PAGES || !s_touched[even + 1]) ? 1u : entry_lo(even + 1));
     tlb_write_hi(hi);
     if (idx & 0x80000000u) tlb_wr(); else tlb_wi();
     C0_WRITE_STATUS(sr);
@@ -591,6 +596,7 @@ static void pager_exception_body(exception_t* ex) {
         code == EXCEPTION_CODE_TLB_MODIFICATION) {
         int32_t page = va_page(C0_BADVADDR());
         if (page >= 0) {
+            s_touched[page] = 1;
             if (code == EXCEPTION_CODE_TLB_MODIFICATION) {
                 // First write to a heap page since it was loaded: mark it dirty
                 // and remap it writable. (Writes to code/rodata are bugs.)
@@ -869,6 +875,7 @@ void n64_pager_start_watchdog(void)
     s_prof_t0 = get_ticks();
     s_prof_on = 1;
     new_timer(TIMER_TICKS(1000), TF_CONTINUOUS, prof_cb);
+    s_ws_on = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -914,4 +921,32 @@ int n64_pager_attach_sd_swap(const char* path)
            (unsigned long)(bytes >> 20), path, (unsigned long)(s_nsdram * PG_SIZE >> 20),
            (unsigned long)(pages * PG_SIZE >> 20));
     return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Working set (with the watchdog): how many distinct code and heap pages were
+// referenced since the previous call. The TLB is flushed at each call so that
+// every page referenced afterwards passes through the exception handler once.
+// The renderer calls this at every present: the result is what one frame
+// needs resident to run without paging.
+// ---------------------------------------------------------------------------
+void n64_pager_workset_report(const char* why) {
+    if (!s_ws_on) return;
+    static uint64_t last_ticks, last_pager;
+    static uint32_t last_faults;
+    uint32_t code = 0, heap = 0;
+    disable_interrupts();
+    for (uint32_t i = 0; i < MAX_PAGES; ++i) {
+        if (s_touched[i]) { if (is_heap(i)) ++heap; else ++code; s_touched[i] = 0; }
+    }
+    tlb_reset();
+    enable_interrupts();
+    const uint64_t now = get_ticks();
+    debugf("[workset] %s: code %lu KiB, heap %lu KiB referenced (%lu KiB of frames); %lu faults, %lu ms in the pager of %lu ms\n",
+           why, (unsigned long)(code * PG_SIZE >> 10), (unsigned long)(heap * PG_SIZE >> 10),
+           (unsigned long)(s_nframes * PG_SIZE >> 10),
+           (unsigned long)(s_stats.faults - last_faults),
+           (unsigned long)(TICKS_TO_US(s_pager_ticks - last_pager) / 1000),
+           (unsigned long)(TICKS_TO_US(now - last_ticks) / 1000));
+    last_ticks = now; last_pager = s_pager_ticks; last_faults = s_stats.faults;
 }
