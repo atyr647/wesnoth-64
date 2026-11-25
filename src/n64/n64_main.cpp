@@ -164,13 +164,13 @@ int main() {
     // Lua kernel and the title-screen loop. wesnoth.cpp is compiled with
     // -Dmain=wesnoth_main for N64 (see CMakeLists.txt).
     // The data tree is the cartridge (/rom) and user data lives in /save (see
-    // n64_vfs.hpp). --nocache: the config cache stores gzip'd copies of the
-    // parsed WML, for which the console has neither space nor a codec.
+    // n64_vfs.hpp). The config cache (gzip'd parsed WML, in /save/cache)
+    // spares later boots the preprocessing of the whole data tree.
     eh_selftest();
     // Extra command-line options (e.g. --log-debug=...) can be put in
     // args.txt in the user data directory, one per line.
     static std::vector<std::string> args = { "wesnoth", "--data-dir", "/rom",
-                                             "--userdata-dir", "/save", "--nocache" };
+                                             "--userdata-dir", "/save" };
     {
         std::string extra;
         if (n64vfs::read("/save/args.txt", extra)) {
