@@ -484,6 +484,11 @@ extern "C" void n64_vheap_mark(const char* what, int stage) {
 #ifdef N64_HEAP_PROFILE
     if (stage != last) n64_vheap_profile_dump(what);
 #endif
+    if (stage != last && stage != 23) {                // 23: loading_stage::none (progress ticks)
+        char why[48];
+        std::snprintf(why, sizeof why, "before loading stage %d", stage);
+        n64_pager_profile_dump(why);
+    }
     last = stage;
 }
 extern "C" unsigned n64_vheap_live_kib(void) { return (unsigned)(s_live >> 10); }

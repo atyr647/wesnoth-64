@@ -565,7 +565,16 @@ static int emulate_cvt_from_long(exception_t* ex) {
     return 1;
 }
 
+static uint64_t s_pager_ticks;   // time spent in pager_exception (faults, swap)
+
+static void pager_exception_body(exception_t* ex);
 static void pager_exception(exception_t* ex) {
+    const uint64_t t0 = get_ticks();
+    pager_exception_body(ex);
+    s_pager_ticks += get_ticks() - t0;
+}
+
+static void pager_exception_body(exception_t* ex) {
     uint32_t code = C0_GET_CAUSE_EXC_CODE(ex->regs->cr);
     if (code == EXCEPTION_CODE_RESERVED_INSTRUCTION && emulate_rdhwr(ex)) return;
     if (code == EXCEPTION_CODE_FLOATING_POINT && emulate_cvt_from_long(ex)) return;
@@ -758,6 +767,60 @@ static void watchdog_cb(int ovfl)
                (unsigned long)(TICKS_TO_US(s_cz_ticks) / (s_cz_in / PG_SIZE - s_cz_zero + 1)));
 }
 
+// ---------------------------------------------------------------------------
+// CPU profile (with the watchdog): a 1 kHz timer records the interrupted PC in
+// 16-byte buckets. Page faults run with interrupts off, so their time is
+// counted separately (s_pager_ticks, s_cz_ticks for compression).
+// n64_pager_profile_dump() prints the hottest buckets since the last dump;
+// symbolize with addr2line (bucket address = PC & ~15).
+// ---------------------------------------------------------------------------
+#define PROF_SLOTS 8192u
+static uint32_t s_prof_pc[PROF_SLOTS];
+static uint32_t s_prof_n[PROF_SLOTS];
+static uint32_t s_prof_total, s_prof_lost;
+static uint64_t s_prof_pager0, s_prof_cz0, s_prof_t0;
+static int s_prof_on;
+
+static void prof_cb(int ovfl)
+{
+    (void)ovfl;
+    uint32_t epc;
+    asm volatile("mfc0 %0,$14" : "=r"(epc));
+    const uint32_t key = epc & ~15u;
+    uint32_t h = (key >> 4) * 2654435761u >> 19;          // 13 bits
+    for (uint32_t i = 0; i < 16; ++i, h = (h + 1) & (PROF_SLOTS - 1)) {
+        if (s_prof_pc[h] == key) { ++s_prof_n[h]; ++s_prof_total; return; }
+        if (s_prof_pc[h] == 0) { s_prof_pc[h] = key; s_prof_n[h] = 1; ++s_prof_total; return; }
+    }
+    ++s_prof_lost;
+}
+
+void n64_pager_profile_dump(const char* why)
+{
+    if (!s_prof_on) return;
+    const uint32_t sr = C0_STATUS();
+    C0_WRITE_STATUS(sr & ~1u);
+    const uint64_t now = get_ticks();
+    debugf("[cpuprof] %s: %lu ms elapsed, %lu samples (%lu lost); in page faults %lu ms, of which compressing %lu ms\n",
+           why, (unsigned long)TICKS_TO_MS(now - s_prof_t0), (unsigned long)s_prof_total, (unsigned long)s_prof_lost,
+           (unsigned long)TICKS_TO_MS(s_pager_ticks - s_prof_pager0), (unsigned long)TICKS_TO_MS(s_cz_ticks - s_prof_cz0));
+    for (int k = 0; k < 60; ++k) {                      // top buckets, selection by repeated max
+        uint32_t best = 0, bi = 0;
+        for (uint32_t i = 0; i < PROF_SLOTS; ++i)
+            if (s_prof_n[i] > best) { best = s_prof_n[i]; bi = i; }
+        if (!best) break;
+        debugf("[cpuprof]   %08lx %lu\n", (unsigned long)s_prof_pc[bi], (unsigned long)best);
+        s_prof_n[bi] = 0;
+    }
+    memset(s_prof_pc, 0, sizeof s_prof_pc);
+    memset(s_prof_n, 0, sizeof s_prof_n);
+    s_prof_total = s_prof_lost = 0;
+    s_prof_pager0 = s_pager_ticks;
+    s_prof_cz0 = s_cz_ticks;
+    s_prof_t0 = now;
+    C0_WRITE_STATUS(sr);
+}
+
 void n64_pager_start_watchdog(void)
 {
     static int started;
@@ -765,6 +828,9 @@ void n64_pager_start_watchdog(void)
     started = 1;
     timer_init();
     new_timer(TIMER_TICKS(15 * 1000000), TF_CONTINUOUS, watchdog_cb);
+    s_prof_t0 = get_ticks();
+    s_prof_on = 1;
+    new_timer(TIMER_TICKS(1000), TF_CONTINUOUS, prof_cb);
 }
 
 // ---------------------------------------------------------------------------

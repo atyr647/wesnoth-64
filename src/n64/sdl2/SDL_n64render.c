@@ -81,6 +81,9 @@ typedef struct
 } N64_RenderData;
 
 /* diagnostics: work done since the last log line */
+/* CPU profile hook (src/n64/pager): dumped after each big frame (the map). */
+extern void n64_pager_profile_dump(const char* why) __attribute__((weak));
+static unsigned s_frame_copies;
 static struct { unsigned copies, skipped, skip_room, skip_self, skip_tiny, fills, clears, queues, uploads; uint64_t last_log; } s_diag;
 
 static size_t tex_bytes(const N64_Texture *t)
@@ -655,6 +658,7 @@ static void copy(N64_RenderData *d, SDL_Texture *texture, const N64_CopyCmd *c, 
     if (!t || !resident(d, t)) { ++s_diag.skipped; ++s_diag.skip_room; return; }
     if (t == d->target) { ++s_diag.skipped; ++s_diag.skip_self; return; }   /* drawing a target into itself */
     ++s_diag.copies;
+    ++s_frame_copies;
     merge_alpha(t);
 
     s0 = c->sx * t->fx; t0 = c->sy * t->fy;
@@ -894,6 +898,8 @@ static int N64R_RenderPresent(SDL_Renderer *renderer)
     d->display = NULL;
     d->target = keep;
     ++d->frame;
+    if (s_frame_copies >= 1000 && n64_pager_profile_dump) n64_pager_profile_dump("after a frame of 1000+ copies");
+    s_frame_copies = 0;
     if (get_ticks() - s_diag.last_log > TICKS_PER_SECOND * 5ull) {
         int n = 0;
         N64_Texture *t;

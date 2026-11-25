@@ -49,8 +49,12 @@ void n64_pager_get_stats(n64_pager_stats_t* out);
 // heap that does not fit in the cartridge SDRAM. Returns non-zero on success.
 int n64_pager_attach_sd_swap(const char* path);
 
-// Log the interrupted PC and pager counters every 15 s (diagnostics).
+// Log the interrupted PC and pager counters every 15 s (diagnostics), and
+// start the CPU profile (1 kHz PC samples).
 void n64_pager_start_watchdog(void);
+
+// Print the CPU profile since the previous dump (no-op without the watchdog).
+void n64_pager_profile_dump(const char* why);
 
 // Size in bytes of the swappable heap at VH_BASE (0 if not available).
 uint32_t n64_pager_heap_size(void);
