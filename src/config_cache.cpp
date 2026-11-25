@@ -317,8 +317,14 @@ config config_cache::load_configs(const std::string& config_path, abstract_valid
 				first = false;
 			}
 		}
-		if(const unsigned char* node = n64_frozen::find_root(key)) {
+		std::uint32_t expected = 0;
+		if(const unsigned char* node = n64_frozen::find_root(key, &expected)) {
 			PLAIN_LOG << "[frozen] using the baked config for '" << key << "'";
+			if(n64_frozen::check_roots) {
+				const std::uint32_t found = n64_frozen::check_hash(config::from_frozen(node));
+				PLAIN_LOG << "[frozen] check of '" << key << "': " << (found == expected ? "identical to" : "DIFFERS from")
+					<< " the stock loader's config (hash " << std::hex << found << ", baked " << expected << std::dec << ")";
+			}
 			return config::from_frozen(node);
 		}
 		PLAIN_LOG << "[frozen] no baked config for '" << key << "': loading from files";

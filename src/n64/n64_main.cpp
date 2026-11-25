@@ -8,6 +8,7 @@
  * src/wesnoth.cpp, which runs the unmodified start-up and game loop.
  */
 
+#include "frozen/n64_frozen.hpp"
 #include "n64_platform.hpp"
 #include "n64_romfs.hpp"
 #include "n64_vfs.hpp"
@@ -184,6 +185,8 @@ int main() {
 #  ifdef N64_PAGED
                     n64_pager_start_watchdog();
 #  endif
+                } else if (a == "--n64-check-frozen") {
+                    n64_frozen::check_roots = true;
                 } else if (!a.empty() && a[0] != '#') {
                     N64_LOG("extra argument: %s", a.c_str());
                     args.push_back(a);

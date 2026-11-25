@@ -13,6 +13,8 @@ extern const unsigned char n64_frozen_image_end[] __attribute__((weak));
 
 namespace n64_frozen
 {
+bool check_roots = false;
+
 const unsigned char* image()
 {
 	static const unsigned char* const start = [] () -> const unsigned char* {

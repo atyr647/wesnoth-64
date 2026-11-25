@@ -18,4 +18,11 @@ const unsigned char* image();
  * @a hash receives the check hash the bake tool computed for it.
  */
 const unsigned char* find_root(std::string_view key, std::uint32_t* hash = nullptr);
+
+/**
+ * Testing (--n64-check-frozen): every baked config is read completely when it
+ * is loaded and its hash compared with the one the bake tool computed from
+ * the stock loader's result.
+ */
+extern bool check_roots;
 } // namespace n64_frozen
