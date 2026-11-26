@@ -152,8 +152,17 @@ void set_free(Block* b, uint32_t size, uint32_t prev_flag) {
 void* large_alloc(uint32_t want) {
     uint32_t need = (want + kHdr + 7) & ~7u;
     if (need < kMinBlock) need = kMinBlock;
-    for (int i = bin_of(need); i < kBins; ++i) {
+    // Free blocks are scattered over the swappable heap, so every block the
+    // search looks at can cost a page fault. Look at a few blocks of the
+    // request's own size class (which may be too small), then take the first
+    // block of a larger class (always big enough); only when there is none
+    // is the rest of the own class searched.
+    const int own = bin_of(need);
+    for (int pass = 0; pass < 3; ++pass) {
+      for (int i = (pass == 1 ? own + 1 : own); i < (pass == 1 ? kBins : own + 1); ++i) {
+        int probes = 0;
         for (Block* b = s_bins[i]; b; b = b->next) {
+            if (pass == 0 && ++probes > 4) break;
             if (b->size() < need) continue;
             bin_remove(b);
             uint32_t rest = b->size() - need;
@@ -168,6 +177,7 @@ void* large_alloc(uint32_t want) {
             }
             return b->payload();
         }
+      }
     }
     // New arena: whole pages, one free block plus an in-use end sentinel.
     uint32_t pages = (need + kHdr + 16 + kPage - 1) / kPage;
